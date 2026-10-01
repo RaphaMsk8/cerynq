@@ -1,5 +1,19 @@
 const BLOCKSCOUT_BASE_URL = "https://api.blockscout.com/5042/api/v2";
 
+type AbiItem = {
+  type?: string;
+  name?: string;
+  stateMutability?: string;
+  inputs?: Array<{
+    name?: string;
+    type?: string;
+  }>;
+  outputs?: Array<{
+    name?: string;
+    type?: string;
+  }>;
+};
+
 type AddressInfo = {
   is_contract?: boolean;
   is_verified?: boolean;
@@ -13,6 +27,7 @@ type SmartContractInfo = {
     address_hash?: string;
     name?: string | null;
   }>;
+  abi?: AbiItem[] | null;
 };
 
 export type ArcExplorerMetadata = {
@@ -21,6 +36,8 @@ export type ArcExplorerMetadata = {
   contractName: string | null;
   proxyType: string | null;
   implementationAddress: string | null;
+  abi: AbiItem[] | null;
+  hasOwnerFunction: boolean | null;
 };
 
 function getApiKey() {
@@ -39,11 +56,10 @@ export async function getArcExplorerMetadata(
   const apiKey = getApiKey();
 
   const addressResponse = await fetch(
-    `${BLOCKSCOUT_BASE_URL}/addresses/${address}`,
+    `${BLOCKSCOUT_BASE_URL}/addresses/${address}?apikey=${apiKey}`,
     {
       headers: {
         Accept: "application/json",
-        Authorization: `Bearer ${apiKey}`,
       },
       cache: "no-store",
     }
@@ -61,11 +77,10 @@ export async function getArcExplorerMetadata(
 
   if (addressInfo.is_contract) {
     const contractResponse = await fetch(
-      `${BLOCKSCOUT_BASE_URL}/smart-contracts/${address}`,
+      `${BLOCKSCOUT_BASE_URL}/smart-contracts/${address}?apikey=${apiKey}`,
       {
         headers: {
           Accept: "application/json",
-          Authorization: `Bearer ${apiKey}`,
         },
         cache: "no-store",
       }
@@ -77,22 +92,42 @@ export async function getArcExplorerMetadata(
     }
   }
 
+  const abi = smartContractInfo?.abi ?? null;
+
+  const hasOwnerFunction =
+    abi === null
+      ? null
+      : abi.some(
+          (item) =>
+            item.type === "function" &&
+            item.name === "owner" &&
+            (item.inputs?.length ?? 0) === 0
+        );
+
   return {
     isContract:
       typeof addressInfo.is_contract === "boolean"
         ? addressInfo.is_contract
         : null,
+
     isVerified:
       typeof addressInfo.is_verified === "boolean"
         ? addressInfo.is_verified
         : null,
+
     contractName:
       smartContractInfo?.name ??
       addressInfo.name ??
       null,
+
     proxyType:
       smartContractInfo?.proxy_type ?? null,
+
     implementationAddress:
       smartContractInfo?.implementations?.[0]?.address_hash ?? null,
+
+    abi,
+
+    hasOwnerFunction,
   };
 }

@@ -2,6 +2,23 @@
 
 import { FormEvent, useState } from "react";
 
+type OwnershipFinding = {
+  id: "A1";
+  name: "Privileged Owner";
+  status: "detected" | "not_detected" | "unknown";
+  severity: "low" | "medium";
+  scoreImpact: number;
+  confidence: "high" | "medium" | "low";
+  ownerAddress: string | null;
+  renounced: boolean | null;
+  evidence: {
+    type: "rpc_call";
+    method: "owner()";
+    source: "Arc Mainnet RPC";
+  };
+  explanation: string;
+};
+
 type ScanResult = {
   ok: boolean;
   network?: string;
@@ -18,8 +35,21 @@ type ScanResult = {
     proxyType: string | null;
     implementationAddress: string | null;
   };
+  ownership?: OwnershipFinding | null;
   error?: string;
 };
+
+function formatStatus(status?: OwnershipFinding["status"]) {
+  if (status === "detected") return "Detected";
+  if (status === "not_detected") return "Not detected";
+  return "Unknown";
+}
+
+function formatConfidence(confidence?: OwnershipFinding["confidence"]) {
+  if (!confidence) return "Unknown";
+
+  return confidence.charAt(0).toUpperCase() + confidence.slice(1);
+}
 
 export default function Home() {
   const [address, setAddress] = useState("");
@@ -104,101 +134,169 @@ export default function Home() {
         )}
 
         {result?.ok && (
-          <div className="mt-8 w-full max-w-2xl rounded-xl border border-zinc-800 bg-zinc-950 p-6 text-left">
-            <div className="mb-6 flex items-center justify-between gap-4">
-              <div>
+          <div className="mt-8 w-full max-w-2xl space-y-6">
+            <section className="rounded-xl border border-zinc-800 bg-zinc-950 p-6 text-left">
+              <div className="mb-6 flex items-center justify-between gap-4">
+                <div>
+                  <p className="text-xs uppercase tracking-[0.2em] text-zinc-500">
+                    Contract Identity
+                  </p>
+
+                  <h2 className="mt-2 text-xl font-medium">
+                    {result.isContract
+                      ? "Smart Contract"
+                      : "Externally Owned Account"}
+                  </h2>
+                </div>
+
+                <span className="rounded-full border border-zinc-700 px-3 py-1 text-xs text-zinc-300">
+                  {result.network}
+                </span>
+              </div>
+
+              <dl className="space-y-4 text-sm">
+                <div>
+                  <dt className="text-zinc-500">Address</dt>
+                  <dd className="mt-1 break-all font-mono text-zinc-200">
+                    {result.address}
+                  </dd>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <dt className="text-zinc-500">Chain ID</dt>
+                    <dd className="mt-1 text-zinc-200">{result.chainId}</dd>
+                  </div>
+
+                  <div>
+                    <dt className="text-zinc-500">Type</dt>
+                    <dd className="mt-1 capitalize text-zinc-200">
+                      {result.contractType}
+                    </dd>
+                  </div>
+
+                  <div>
+                    <dt className="text-zinc-500">Bytecode</dt>
+                    <dd className="mt-1 text-zinc-200">
+                      {result.bytecodeDetected ? "Detected" : "Not detected"}
+                    </dd>
+                  </div>
+
+                  <div>
+                    <dt className="text-zinc-500">Bytecode size</dt>
+                    <dd className="mt-1 text-zinc-200">
+                      {result.bytecodeSize ?? 0} bytes
+                    </dd>
+                  </div>
+                </div>
+              </dl>
+
+              <div className="mt-6 border-t border-zinc-800 pt-6">
                 <p className="text-xs uppercase tracking-[0.2em] text-zinc-500">
-                  Contract Identity
+                  Explorer Intelligence
                 </p>
 
-                <h2 className="mt-2 text-xl font-medium">
-                  {result.isContract
-                    ? "Smart Contract"
-                    : "Externally Owned Account"}
-                </h2>
-              </div>
+                <div className="mt-4 grid grid-cols-1 gap-4 text-sm sm:grid-cols-2">
+                  <div>
+                    <p className="text-zinc-500">Verified</p>
+                    <p className="mt-1 text-zinc-200">
+                      {result.explorer?.isVerified === true
+                        ? "Yes"
+                        : result.explorer?.isVerified === false
+                          ? "No"
+                          : "Unknown"}
+                    </p>
+                  </div>
 
-              <span className="rounded-full border border-zinc-700 px-3 py-1 text-xs text-zinc-300">
-                {result.network}
-              </span>
-            </div>
+                  <div>
+                    <p className="text-zinc-500">Contract name</p>
+                    <p className="mt-1 text-zinc-200">
+                      {result.explorer?.contractName ?? "Unknown"}
+                    </p>
+                  </div>
 
-            <dl className="space-y-4 text-sm">
-              <div>
-                <dt className="text-zinc-500">Address</dt>
-                <dd className="mt-1 break-all font-mono text-zinc-200">
-                  {result.address}
-                </dd>
-              </div>
+                  <div>
+                    <p className="text-zinc-500">Proxy</p>
+                    <p className="mt-1 text-zinc-200">
+                      {result.explorer?.proxyType ?? "Not detected"}
+                    </p>
+                  </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <dt className="text-zinc-500">Chain ID</dt>
-                  <dd className="mt-1 text-zinc-200">{result.chainId}</dd>
-                </div>
-
-                <div>
-                  <dt className="text-zinc-500">Type</dt>
-                  <dd className="mt-1 capitalize text-zinc-200">
-                    {result.contractType}
-                  </dd>
-                </div>
-
-                <div>
-                  <dt className="text-zinc-500">Bytecode</dt>
-                  <dd className="mt-1 text-zinc-200">
-                    {result.bytecodeDetected ? "Detected" : "Not detected"}
-                  </dd>
-                </div>
-
-                <div>
-                  <dt className="text-zinc-500">Bytecode size</dt>
-                  <dd className="mt-1 text-zinc-200">
-                    {result.bytecodeSize ?? 0} bytes
-                  </dd>
+                  <div>
+                    <p className="text-zinc-500">Implementation</p>
+                    <p className="mt-1 break-all font-mono text-zinc-200">
+                      {result.explorer?.implementationAddress ?? "N/A"}
+                    </p>
+                  </div>
                 </div>
               </div>
-            </dl>
+            </section>
 
-            <div className="mt-6 border-t border-zinc-800 pt-6">
-              <p className="text-xs uppercase tracking-[0.2em] text-zinc-500">
-                Explorer Intelligence
-              </p>
+            {result.ownership && (
+              <section className="rounded-xl border border-zinc-800 bg-zinc-950 p-6 text-left">
+                <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                  <div>
+                    <p className="text-xs uppercase tracking-[0.2em] text-zinc-500">
+                      Risk Findings
+                    </p>
 
-              <div className="mt-4 grid grid-cols-1 gap-4 text-sm sm:grid-cols-2">
-                <div>
-                  <p className="text-zinc-500">Verified</p>
-                  <p className="mt-1 text-zinc-200">
-                    {result.explorer?.isVerified === true
-                      ? "Yes"
-                      : result.explorer?.isVerified === false
-                        ? "No"
-                        : "Unknown"}
-                  </p>
+                    <h2 className="mt-2 text-xl font-medium">
+                      {result.ownership.name}
+                    </h2>
+
+                    <p className="mt-2 text-sm leading-6 text-zinc-400">
+                      {result.ownership.explanation}
+                    </p>
+                  </div>
+
+                  <span className="rounded-full border border-zinc-700 px-3 py-1 text-xs uppercase tracking-wide text-zinc-300">
+                    {formatStatus(result.ownership.status)}
+                  </span>
                 </div>
 
-                <div>
-                  <p className="text-zinc-500">Contract name</p>
-                  <p className="mt-1 text-zinc-200">
-                    {result.explorer?.contractName ?? "Unknown"}
-                  </p>
+                <div className="mt-6 grid grid-cols-2 gap-4 text-sm">
+                  <div>
+                    <p className="text-zinc-500">Finding ID</p>
+                    <p className="mt-1 text-zinc-200">
+                      {result.ownership.id}
+                    </p>
+                  </div>
+
+                  <div>
+                    <p className="text-zinc-500">Confidence</p>
+                    <p className="mt-1 text-zinc-200">
+                      {formatConfidence(result.ownership.confidence)}
+                    </p>
+                  </div>
+
+                  <div>
+                    <p className="text-zinc-500">Score impact</p>
+                    <p className="mt-1 text-zinc-200">
+                      +{result.ownership.scoreImpact}
+                    </p>
+                  </div>
+
+                  <div>
+                    <p className="text-zinc-500">Evidence</p>
+                    <p className="mt-1 text-zinc-200">
+                      {result.ownership.evidence.method}
+                    </p>
+                  </div>
                 </div>
 
-                <div>
-                  <p className="text-zinc-500">Proxy</p>
-                  <p className="mt-1 text-zinc-200">
-                    {result.explorer?.proxyType ?? "Not detected"}
-                  </p>
-                </div>
+                <div className="mt-6 border-t border-zinc-800 pt-6">
+                  <p className="text-sm text-zinc-500">Owner address</p>
 
-                <div>
-                  <p className="text-zinc-500">Implementation</p>
-                  <p className="mt-1 break-all font-mono text-zinc-200">
-                    {result.explorer?.implementationAddress ?? "N/A"}
+                  <p className="mt-1 break-all font-mono text-sm text-zinc-200">
+                    {result.ownership.ownerAddress ?? "Unknown"}
+                  </p>
+
+                  <p className="mt-4 text-xs text-zinc-600">
+                    Evidence source: {result.ownership.evidence.source}
                   </p>
                 </div>
-              </div>
-            </div>
+              </section>
+            )}
           </div>
         )}
 

@@ -4,6 +4,7 @@ import { z } from "zod";
 
 import { arcClient } from "@/lib/arc/client";
 import { getArcExplorerMetadata } from "@/lib/arc/explorer";
+import { detectOwnership } from "@/lib/detectors/ownership";
 
 const scanSchema = z.object({
   address: z.string().refine(isAddress, {
@@ -41,6 +42,12 @@ try {
     const isContract = Boolean(bytecode && bytecode !== "0x");
 const bytecodeSize = bytecode ? Math.max((bytecode.length - 2) / 2, 0) : 0;
 
+const ownershipFinding = isContract
+  ? await detectOwnership(address, {
+      hasOwnerFunction: explorerMetadata?.hasOwnerFunction ?? null,
+    })
+  : null;
+
 return NextResponse.json({
   ok: true,
   network: "Arc Mainnet",
@@ -52,13 +59,17 @@ return NextResponse.json({
   bytecodeSize,
 
   explorer: {
-    available: explorerMetadata !== null,
-    isVerified: explorerMetadata?.isVerified ?? null,
-    contractName: explorerMetadata?.contractName ?? null,
-    proxyType: explorerMetadata?.proxyType ?? null,
-    implementationAddress:
-      explorerMetadata?.implementationAddress ?? null,
-  },
+  available: explorerMetadata !== null,
+  isVerified: explorerMetadata?.isVerified ?? null,
+  contractName: explorerMetadata?.contractName ?? null,
+  proxyType: explorerMetadata?.proxyType ?? null,
+  implementationAddress:
+    explorerMetadata?.implementationAddress ?? null,
+  abiAvailable: explorerMetadata?.abi !== null,
+  hasOwnerFunction: explorerMetadata?.hasOwnerFunction ?? null,
+},
+
+ownership: ownershipFinding,
 
 });
   } catch (error) {
