@@ -34,9 +34,16 @@ export type ArcExplorerMetadata = {
   isContract: boolean | null;
   isVerified: boolean | null;
   contractName: string | null;
+
   proxyType: string | null;
   implementationAddress: string | null;
+
+  implementationIsVerified: boolean | null;
+  implementationContractName: string | null;
+
   abi: AbiItem[] | null;
+  abiSource: "contract" | "implementation" | null;
+
   hasOwnerFunction: boolean | null;
 };
 
@@ -50,12 +57,11 @@ function getApiKey() {
   return apiKey;
 }
 
-export async function getArcExplorerMetadata(
-  address: string
-): Promise<ArcExplorerMetadata> {
-  const apiKey = getApiKey();
-
-  const addressResponse = await fetch(
+async function fetchAddressInfo(
+  address: string,
+  apiKey: string
+): Promise<AddressInfo> {
+  const response = await fetch(
     `${BLOCKSCOUT_BASE_URL}/addresses/${address}?apikey=${apiKey}`,
     {
       headers: {
@@ -65,44 +71,104 @@ export async function getArcExplorerMetadata(
     }
   );
 
-  if (!addressResponse.ok) {
+  if (!response.ok) {
     throw new Error(
-      `Blockscout address request failed with status ${addressResponse.status}`
+      `Blockscout address request failed with status ${response.status}`
     );
   }
 
-  const addressInfo = (await addressResponse.json()) as AddressInfo;
+  return (await response.json()) as AddressInfo;
+}
+
+async function fetchSmartContractInfo(
+  address: string,
+  apiKey: string
+): Promise<SmartContractInfo | null> {
+  const response = await fetch(
+    `${BLOCKSCOUT_BASE_URL}/smart-contracts/${address}?apikey=${apiKey}`,
+    {
+      headers: {
+        Accept: "application/json",
+      },
+      cache: "no-store",
+    }
+  );
+
+  if (!response.ok) {
+    return null;
+  }
+
+  return (await response.json()) as SmartContractInfo;
+}
+
+function detectOwnerFunction(abi: AbiItem[] | null) {
+  if (abi === null) {
+    return null;
+  }
+
+  return abi.some(
+    (item) =>
+      item.type === "function" &&
+      item.name === "owner" &&
+      (item.inputs?.length ?? 0) === 0
+  );
+}
+
+export async function getArcExplorerMetadata(
+  address: string
+): Promise<ArcExplorerMetadata> {
+  const apiKey = getApiKey();
+
+  const addressInfo = await fetchAddressInfo(address, apiKey);
 
   let smartContractInfo: SmartContractInfo | null = null;
 
   if (addressInfo.is_contract) {
-    const contractResponse = await fetch(
-      `${BLOCKSCOUT_BASE_URL}/smart-contracts/${address}?apikey=${apiKey}`,
-      {
-        headers: {
-          Accept: "application/json",
-        },
-        cache: "no-store",
-      }
-    );
+    smartContractInfo = await fetchSmartContractInfo(address, apiKey);
+  }
 
-    if (contractResponse.ok) {
-      smartContractInfo =
-        (await contractResponse.json()) as SmartContractInfo;
+  const proxyType = smartContractInfo?.proxy_type ?? null;
+
+  const implementationAddress =
+    smartContractInfo?.implementations?.[0]?.address_hash ?? null;
+
+  const contractAbi = smartContractInfo?.abi ?? null;
+
+  let implementationAddressInfo: AddressInfo | null = null;
+  let implementationSmartContractInfo: SmartContractInfo | null = null;
+
+  if (implementationAddress) {
+    try {
+      implementationAddressInfo = await fetchAddressInfo(
+        implementationAddress,
+        apiKey
+      );
+
+      implementationSmartContractInfo = await fetchSmartContractInfo(
+        implementationAddress,
+        apiKey
+      );
+    } catch {
+      implementationAddressInfo = null;
+      implementationSmartContractInfo = null;
     }
   }
 
-  const abi = smartContractInfo?.abi ?? null;
+  const implementationAbi =
+    implementationSmartContractInfo?.abi ?? null;
 
-  const hasOwnerFunction =
-    abi === null
-      ? null
-      : abi.some(
-          (item) =>
-            item.type === "function" &&
-            item.name === "owner" &&
-            (item.inputs?.length ?? 0) === 0
-        );
+  const effectiveAbi =
+    implementationAbi ??
+    contractAbi;
+
+  const abiSource =
+    implementationAbi !== null
+      ? "implementation"
+      : contractAbi !== null
+      ? "contract"
+      : null;
+
+  const hasOwnerFunction = detectOwnerFunction(effectiveAbi);
 
   return {
     isContract:
@@ -120,13 +186,23 @@ export async function getArcExplorerMetadata(
       addressInfo.name ??
       null,
 
-    proxyType:
-      smartContractInfo?.proxy_type ?? null,
+    proxyType,
 
-    implementationAddress:
-      smartContractInfo?.implementations?.[0]?.address_hash ?? null,
+    implementationAddress,
 
-    abi,
+    implementationIsVerified:
+      typeof implementationAddressInfo?.is_verified === "boolean"
+        ? implementationAddressInfo.is_verified
+        : null,
+
+    implementationContractName:
+      implementationSmartContractInfo?.name ??
+      implementationAddressInfo?.name ??
+      null,
+
+    abi: effectiveAbi,
+
+    abiSource,
 
     hasOwnerFunction,
   };

@@ -60,13 +60,33 @@ return NextResponse.json({
 
   explorer: {
   available: explorerMetadata !== null,
-  isVerified: explorerMetadata?.isVerified ?? null,
-  contractName: explorerMetadata?.contractName ?? null,
-  proxyType: explorerMetadata?.proxyType ?? null,
+
+  isVerified:
+    explorerMetadata?.isVerified ?? null,
+
+  contractName:
+    explorerMetadata?.contractName ?? null,
+
+  proxyType:
+    explorerMetadata?.proxyType ?? null,
+
   implementationAddress:
     explorerMetadata?.implementationAddress ?? null,
-  abiAvailable: explorerMetadata?.abi !== null,
-  hasOwnerFunction: explorerMetadata?.hasOwnerFunction ?? null,
+
+  implementationIsVerified:
+    explorerMetadata?.implementationIsVerified ?? null,
+
+  implementationContractName:
+    explorerMetadata?.implementationContractName ?? null,
+
+  abiAvailable:
+    explorerMetadata?.abi !== null,
+
+  abiSource:
+    explorerMetadata?.abiSource ?? null,
+
+  hasOwnerFunction:
+    explorerMetadata?.hasOwnerFunction ?? null,
 },
 
 ownership: ownershipFinding,
