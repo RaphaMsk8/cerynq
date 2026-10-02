@@ -5,6 +5,7 @@ import { z } from "zod";
 import { arcClient } from "@/lib/arc/client";
 import { getArcExplorerMetadata } from "@/lib/arc/explorer";
 import { detectOwnership } from "@/lib/detectors/ownership";
+import { detectPauseCapability } from "@/lib/detectors/pause";
 
 const scanSchema = z.object({
   address: z.string().refine(isAddress, {
@@ -45,6 +46,12 @@ const bytecodeSize = bytecode ? Math.max((bytecode.length - 2) / 2, 0) : 0;
 const ownershipFinding = isContract
   ? await detectOwnership(address, {
       hasOwnerFunction: explorerMetadata?.hasOwnerFunction ?? null,
+    })
+  : null;
+const pauseFinding = isContract
+  ? detectPauseCapability({
+      abi: explorerMetadata?.abi ?? null,
+      abiSource: explorerMetadata?.abiSource ?? null,
     })
   : null;
 
@@ -90,6 +97,7 @@ return NextResponse.json({
 },
 
 ownership: ownershipFinding,
+pause: pauseFinding,
 
 });
   } catch (error) {
