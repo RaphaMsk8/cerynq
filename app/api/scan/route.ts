@@ -8,6 +8,7 @@ import { detectOwnership } from "@/lib/detectors/ownership";
 import { detectPauseCapability } from "@/lib/detectors/pause";
 import { detectBlacklistCapability } from "@/lib/detectors/blacklist";
 import { detectWhitelistCapability } from "@/lib/detectors/whitelist";
+import { detectOtherPrivilegedControls } from "@/lib/detectors/privileged";
 
 const scanSchema = z.object({
   address: z.string().refine(isAddress, {
@@ -78,6 +79,12 @@ const whitelistFinding = isContract
       abiSource: explorerMetadata?.abiSource ?? null,
     })
   : null;
+const privilegedFinding = isContract
+  ? detectOtherPrivilegedControls({
+      abi: explorerMetadata?.abi ?? null,
+      abiSource: explorerMetadata?.abiSource ?? null,
+    })
+  : null;
 
     return NextResponse.json({
       ok: true,
@@ -124,6 +131,7 @@ const whitelistFinding = isContract
       pause: pauseFinding,
       blacklist: blacklistFinding,
       whitelist: whitelistFinding,
+      privileged: privilegedFinding,
     });
   } catch (error) {
     console.error("Cerynq scan error:", error);
