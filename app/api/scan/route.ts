@@ -7,6 +7,7 @@ import { getArcExplorerMetadata } from "@/lib/arc/explorer";
 import { detectOwnership } from "@/lib/detectors/ownership";
 import { detectPauseCapability } from "@/lib/detectors/pause";
 import { detectBlacklistCapability } from "@/lib/detectors/blacklist";
+import { detectWhitelistCapability } from "@/lib/detectors/whitelist";
 
 const scanSchema = z.object({
   address: z.string().refine(isAddress, {
@@ -71,6 +72,12 @@ export async function POST(request: Request) {
           abiSource: explorerMetadata?.abiSource ?? null,
         })
       : null;
+const whitelistFinding = isContract
+  ? detectWhitelistCapability({
+      abi: explorerMetadata?.abi ?? null,
+      abiSource: explorerMetadata?.abiSource ?? null,
+    })
+  : null;
 
     return NextResponse.json({
       ok: true,
@@ -116,6 +123,7 @@ export async function POST(request: Request) {
       ownership: ownershipFinding,
       pause: pauseFinding,
       blacklist: blacklistFinding,
+      whitelist: whitelistFinding,
     });
   } catch (error) {
     console.error("Cerynq scan error:", error);
