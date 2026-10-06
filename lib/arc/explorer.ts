@@ -1,4 +1,7 @@
-const BLOCKSCOUT_BASE_URL = "https://api.blockscout.com/5042/api/v2";
+const BLOCKSCOUT_BASE_URL =
+  "https://api.blockscout.com/5042/api/v2";
+
+const BLOCKSCOUT_TIMEOUT_MS = 8_000;
 
 type AbiItem = {
   type?: string;
@@ -42,66 +45,123 @@ export type ArcExplorerMetadata = {
   implementationContractName: string | null;
 
   abi: AbiItem[] | null;
-  abiSource: "contract" | "implementation" | null;
+  abiSource:
+    | "contract"
+    | "implementation"
+    | null;
 
   hasOwnerFunction: boolean | null;
 };
 
+class BlockscoutHttpError extends Error {
+  status: number;
+
+  constructor(
+    status: number,
+    endpoint: string
+  ) {
+    super(
+      `Blockscout request failed with status ${status} for ${endpoint}`
+    );
+
+    this.name = "BlockscoutHttpError";
+    this.status = status;
+  }
+}
+
 function getApiKey() {
-  const apiKey = process.env.BLOCKSCOUT_API_KEY;
+  const apiKey =
+    process.env.BLOCKSCOUT_API_KEY;
 
   if (!apiKey) {
-    throw new Error("BLOCKSCOUT_API_KEY is not configured");
+    throw new Error(
+      "BLOCKSCOUT_API_KEY is not configured"
+    );
   }
 
   return apiKey;
 }
 
+async function fetchBlockscoutJson<T>(
+  endpoint: string,
+  apiKey: string
+): Promise<T | null> {
+  const controller =
+    new AbortController();
+
+  const timeout = setTimeout(() => {
+    controller.abort();
+  }, BLOCKSCOUT_TIMEOUT_MS);
+
+  try {
+    const separator = endpoint.includes("?")
+      ? "&"
+      : "?";
+
+    const response = await fetch(
+      `${BLOCKSCOUT_BASE_URL}${endpoint}${separator}apikey=${encodeURIComponent(
+        apiKey
+      )}`,
+      {
+        headers: {
+          Accept: "application/json",
+        },
+        cache: "no-store",
+        signal: controller.signal,
+      }
+    );
+
+    if (response.status === 404) {
+      return null;
+    }
+
+    if (!response.ok) {
+      throw new BlockscoutHttpError(
+        response.status,
+        endpoint
+      );
+    }
+
+    return (await response.json()) as T;
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      error.name === "AbortError"
+    ) {
+      throw new Error(
+        `Blockscout request timed out after ${BLOCKSCOUT_TIMEOUT_MS}ms`
+      );
+    }
+
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 async function fetchAddressInfo(
   address: string,
   apiKey: string
-): Promise<AddressInfo> {
-  const response = await fetch(
-    `${BLOCKSCOUT_BASE_URL}/addresses/${address}?apikey=${apiKey}`,
-    {
-      headers: {
-        Accept: "application/json",
-      },
-      cache: "no-store",
-    }
+): Promise<AddressInfo | null> {
+  return fetchBlockscoutJson<AddressInfo>(
+    `/addresses/${address}`,
+    apiKey
   );
-
-  if (!response.ok) {
-    throw new Error(
-      `Blockscout address request failed with status ${response.status}`
-    );
-  }
-
-  return (await response.json()) as AddressInfo;
 }
 
 async function fetchSmartContractInfo(
   address: string,
   apiKey: string
 ): Promise<SmartContractInfo | null> {
-  const response = await fetch(
-    `${BLOCKSCOUT_BASE_URL}/smart-contracts/${address}?apikey=${apiKey}`,
-    {
-      headers: {
-        Accept: "application/json",
-      },
-      cache: "no-store",
-    }
+  return fetchBlockscoutJson<SmartContractInfo>(
+    `/smart-contracts/${address}`,
+    apiKey
   );
-
-  if (!response.ok) {
-    return null;
-  }
-
-  return (await response.json()) as SmartContractInfo;
 }
 
-function detectOwnerFunction(abi: AbiItem[] | null) {
+function detectOwnerFunction(
+  abi: AbiItem[] | null
+) {
   if (abi === null) {
     return null;
   }
@@ -119,65 +179,89 @@ export async function getArcExplorerMetadata(
 ): Promise<ArcExplorerMetadata> {
   const apiKey = getApiKey();
 
-  const addressInfo = await fetchAddressInfo(address, apiKey);
+  const addressInfo =
+    await fetchAddressInfo(
+      address,
+      apiKey
+    );
 
-  let smartContractInfo: SmartContractInfo | null = null;
-
-  if (addressInfo.is_contract) {
-    smartContractInfo = await fetchSmartContractInfo(address, apiKey);
+  if (addressInfo === null) {
+    throw new Error(
+      "Address was not found by Arc Explorer"
+    );
   }
 
-  const proxyType = smartContractInfo?.proxy_type ?? null;
+  let smartContractInfo:
+    | SmartContractInfo
+    | null = null;
+
+  if (addressInfo.is_contract) {
+    smartContractInfo =
+      await fetchSmartContractInfo(
+        address,
+        apiKey
+      );
+  }
+
+  const proxyType =
+    smartContractInfo?.proxy_type ?? null;
 
   const implementationAddress =
-    smartContractInfo?.implementations?.[0]?.address_hash ?? null;
+    smartContractInfo?.implementations?.[0]
+      ?.address_hash ?? null;
 
-  const contractAbi = smartContractInfo?.abi ?? null;
+  const contractAbi =
+    smartContractInfo?.abi ?? null;
 
-  let implementationAddressInfo: AddressInfo | null = null;
-  let implementationSmartContractInfo: SmartContractInfo | null = null;
+  let implementationAddressInfo:
+    | AddressInfo
+    | null = null;
+
+  let implementationSmartContractInfo:
+    | SmartContractInfo
+    | null = null;
 
   if (implementationAddress) {
-    try {
-      implementationAddressInfo = await fetchAddressInfo(
+    implementationAddressInfo =
+      await fetchAddressInfo(
         implementationAddress,
         apiKey
       );
 
-      implementationSmartContractInfo = await fetchSmartContractInfo(
+    implementationSmartContractInfo =
+      await fetchSmartContractInfo(
         implementationAddress,
         apiKey
       );
-    } catch {
-      implementationAddressInfo = null;
-      implementationSmartContractInfo = null;
-    }
   }
 
   const implementationAbi =
-    implementationSmartContractInfo?.abi ?? null;
+    implementationSmartContractInfo?.abi ??
+    null;
 
   const effectiveAbi =
-    implementationAbi ??
-    contractAbi;
+    implementationAbi ?? contractAbi;
 
   const abiSource =
     implementationAbi !== null
       ? "implementation"
       : contractAbi !== null
-      ? "contract"
-      : null;
+        ? "contract"
+        : null;
 
-  const hasOwnerFunction = detectOwnerFunction(effectiveAbi);
+  const hasOwnerFunction =
+    detectOwnerFunction(effectiveAbi);
 
   return {
     isContract:
-      typeof addressInfo.is_contract === "boolean"
+      typeof addressInfo.is_contract ===
+      "boolean"
         ? addressInfo.is_contract
         : null,
 
     isVerified:
-      typeof addressInfo.is_verified === "boolean"
+      typeof addressInfo.is_verified ===
+      "boolean"
         ? addressInfo.is_verified
         : null,
 
@@ -191,7 +275,8 @@ export async function getArcExplorerMetadata(
     implementationAddress,
 
     implementationIsVerified:
-      typeof implementationAddressInfo?.is_verified === "boolean"
+      typeof implementationAddressInfo
+        ?.is_verified === "boolean"
         ? implementationAddressInfo.is_verified
         : null,
 

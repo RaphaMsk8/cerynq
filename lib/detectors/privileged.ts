@@ -12,12 +12,18 @@ type AbiItem = {
   }>;
 };
 
-type AbiSource = "contract" | "implementation" | null;
+type AbiSource =
+  | "contract"
+  | "implementation"
+  | null;
 
 export type PrivilegedFinding = {
   id: "A5";
   name: "Other Privileged Controls";
-  status: "detected" | "not_detected" | "unknown";
+  status:
+    | "detected"
+    | "not_detected"
+    | "unknown";
   severity: "low" | "medium";
   scoreImpact: number;
   confidence: "high" | "medium" | "low";
@@ -67,7 +73,9 @@ const readOnlyIndicatorNames = new Set([
   "default_admin_role",
 ]);
 
-function normalizeMethodName(name: string): string {
+function normalizeMethodName(
+  name: string
+): string {
   return name.toLowerCase();
 }
 
@@ -83,7 +91,8 @@ export function detectOtherPrivilegedControls(
 ): PrivilegedFinding {
   const { abi, abiSource } = options;
 
-  const evidenceSource = getEvidenceSource(abiSource);
+  const evidenceSource =
+    getEvidenceSource(abiSource);
 
   if (abi === null) {
     return {
@@ -99,48 +108,61 @@ export function detectOtherPrivilegedControls(
         source: evidenceSource,
       },
       explanation:
-        "Cerynq could not inspect a verified ABI for additional privileged administrative controls.",
+        "Cerynq could not inspect an analyzed ABI for additional administrative signals, so this check could not be classified.",
     };
   }
 
-  const relevantFunctions = abi.filter((item) => {
-    if (
-      item.type !== "function" ||
-      typeof item.name !== "string"
-    ) {
-      return false;
-    }
-
-    const normalizedName = normalizeMethodName(item.name);
-
-    return (
-      administrativeMethodNames.has(normalizedName) ||
-      readOnlyIndicatorNames.has(normalizedName)
-    );
-  });
-
-  const evidenceMethods = [
-    ...new Set(
-      relevantFunctions.map((item) => item.name as string)
-    ),
-  ];
-
-  const administrativeControls = relevantFunctions.filter(
+  const relevantFunctions = abi.filter(
     (item) => {
-      if (typeof item.name !== "string") {
+      if (
+        item.type !== "function" ||
+        typeof item.name !== "string"
+      ) {
         return false;
       }
 
-      const normalizedName = normalizeMethodName(item.name);
+      const normalizedName =
+        normalizeMethodName(item.name);
 
       return (
-        administrativeMethodNames.has(normalizedName) &&
-        !isReadOnly(item)
+        administrativeMethodNames.has(
+          normalizedName
+        ) ||
+        readOnlyIndicatorNames.has(
+          normalizedName
+        )
       );
     }
   );
 
-  if (administrativeControls.length > 0) {
+  const evidenceMethods = [
+    ...new Set(
+      relevantFunctions.map(
+        (item) => item.name as string
+      )
+    ),
+  ];
+
+  const stateChangingControls =
+    relevantFunctions.filter((item) => {
+      if (
+        typeof item.name !== "string"
+      ) {
+        return false;
+      }
+
+      const normalizedName =
+        normalizeMethodName(item.name);
+
+      return (
+        administrativeMethodNames.has(
+          normalizedName
+        ) &&
+        !isReadOnly(item)
+      );
+    });
+
+  if (stateChangingControls.length > 0) {
     return {
       id: "A5",
       name: "Other Privileged Controls",
@@ -154,7 +176,7 @@ export function detectOtherPrivilegedControls(
         source: evidenceSource,
       },
       explanation:
-        "The verified ABI exposes additional administrative controls that may allow privileged actors to manage roles or administrative authority.",
+        "The analyzed ABI exposes supported state-changing administrative methods related to roles or administrative authority. Caller restrictions and runtime behavior are not determined by this detector.",
     };
   }
 
@@ -172,7 +194,7 @@ export function detectOtherPrivilegedControls(
         source: evidenceSource,
       },
       explanation:
-        "The verified ABI exposes read-only administrative indicators, but Cerynq did not find standard methods that can modify roles or administrative authority.",
+        "Administrative interface signals were identified, but no supported state-changing methods for modifying roles or administrative authority were identified in the analyzed ABI.",
     };
   }
 
@@ -189,6 +211,6 @@ export function detectOtherPrivilegedControls(
       source: evidenceSource,
     },
     explanation:
-      "The verified ABI does not expose standard additional privileged administrative controls.",
+      "No supported state-changing methods for modifying roles or administrative authority were identified in the analyzed ABI.",
   };
 }

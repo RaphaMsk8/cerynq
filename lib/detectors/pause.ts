@@ -12,12 +12,18 @@ type AbiItem = {
   }>;
 };
 
-type AbiSource = "contract" | "implementation" | null;
+type AbiSource =
+  | "contract"
+  | "implementation"
+  | null;
 
 export type PauseFinding = {
   id: "A2";
   name: "Pause Capability";
-  status: "detected" | "not_detected" | "unknown";
+  status:
+    | "detected"
+    | "not_detected"
+    | "unknown";
   severity: "low" | "medium";
   scoreImpact: number;
   confidence: "high" | "medium" | "low";
@@ -51,12 +57,20 @@ function getEvidenceSource(
   return "Arc Explorer ABI";
 }
 
+function isReadOnly(item: AbiItem): boolean {
+  return (
+    item.stateMutability === "view" ||
+    item.stateMutability === "pure"
+  );
+}
+
 export function detectPauseCapability(
   options: DetectPauseOptions
 ): PauseFinding {
   const { abi, abiSource } = options;
 
-  const evidenceSource = getEvidenceSource(abiSource);
+  const evidenceSource =
+    getEvidenceSource(abiSource);
 
   if (abi === null) {
     return {
@@ -72,26 +86,38 @@ export function detectPauseCapability(
         source: evidenceSource,
       },
       explanation:
-        "Cerynq could not inspect a verified ABI for pause-related controls.",
+        "Cerynq could not inspect an analyzed ABI for pause-related signals, so this check could not be classified.",
     };
   }
 
-  const pauseMethods = abi
-    .filter(
+  const relevantFunctions = abi.filter(
+    (item) =>
+      item.type === "function" &&
+      typeof item.name === "string" &&
+      ["pause", "unpause", "paused"].includes(
+        item.name
+      )
+  );
+
+  const evidenceMethods = [
+    ...new Set(
+      relevantFunctions.map(
+        (item) => item.name as string
+      )
+    ),
+  ];
+
+  const stateChangingControls =
+    relevantFunctions.filter(
       (item) =>
-        item.type === "function" &&
         typeof item.name === "string" &&
-        ["pause", "unpause", "paused"].includes(item.name)
-    )
-    .map((item) => item.name as string);
+        ["pause", "unpause"].includes(
+          item.name
+        ) &&
+        !isReadOnly(item)
+    );
 
-  const uniqueMethods = [...new Set(pauseMethods)];
-
-  const hasPauseControl =
-    uniqueMethods.includes("pause") ||
-    uniqueMethods.includes("unpause");
-
-  if (hasPauseControl) {
+  if (stateChangingControls.length > 0) {
     return {
       id: "A2",
       name: "Pause Capability",
@@ -101,11 +127,29 @@ export function detectPauseCapability(
       confidence: "high",
       evidence: {
         type: "verified_abi",
-        methods: uniqueMethods,
+        methods: evidenceMethods,
         source: evidenceSource,
       },
       explanation:
-        "The verified ABI exposes pause-related administrative controls that may allow privileged actors to halt or resume contract activity.",
+        "The analyzed ABI exposes supported state-changing pause() and/or unpause() functions. These functions may support halting or resuming contract activity; caller restrictions are not determined by this detector.",
+    };
+  }
+
+  if (evidenceMethods.length > 0) {
+    return {
+      id: "A2",
+      name: "Pause Capability",
+      status: "not_detected",
+      severity: "low",
+      scoreImpact: 0,
+      confidence: "high",
+      evidence: {
+        type: "verified_abi",
+        methods: evidenceMethods,
+        source: evidenceSource,
+      },
+      explanation:
+        "Pause-related interface signals were identified, but no supported state-changing pause() or unpause() methods were identified in the analyzed ABI.",
     };
   }
 
@@ -118,10 +162,10 @@ export function detectPauseCapability(
     confidence: "high",
     evidence: {
       type: "verified_abi",
-      methods: uniqueMethods,
+      methods: [],
       source: evidenceSource,
     },
     explanation:
-      "The verified ABI does not expose standard pause() or unpause() administrative controls.",
+      "No supported state-changing pause() or unpause() methods were identified in the analyzed ABI.",
   };
 }

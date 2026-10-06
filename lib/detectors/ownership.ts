@@ -18,10 +18,23 @@ const ownerAbi = [
   },
 ] as const;
 
+type AbiSource =
+  | "contract"
+  | "implementation"
+  | null;
+
+type ExplorerEvidenceSource =
+  | "Arc Explorer Contract ABI"
+  | "Arc Explorer Implementation ABI"
+  | "Arc Explorer ABI";
+
 export type OwnershipFinding = {
   id: "A1";
-  name: "Privileged Owner";
-  status: "detected" | "not_detected" | "unknown";
+  name: "Active Ownership";
+  status:
+    | "detected"
+    | "not_detected"
+    | "unknown";
   severity: "low" | "medium";
   scoreImpact: number;
   confidence: "high" | "medium" | "low";
@@ -30,23 +43,48 @@ export type OwnershipFinding = {
   evidence: {
     type: "verified_abi" | "rpc_call";
     method: "owner()";
-    source: "Arc Explorer ABI" | "Arc Mainnet RPC";
+    source:
+      | ExplorerEvidenceSource
+      | "Arc Mainnet RPC";
+    interfaceSource:
+      | ExplorerEvidenceSource
+      | null;
   };
   explanation: string;
 };
 
 type DetectOwnershipOptions = {
   hasOwnerFunction: boolean | null;
+  abiSource: AbiSource;
 };
+
+function getExplorerEvidenceSource(
+  abiSource: AbiSource
+): ExplorerEvidenceSource {
+  if (abiSource === "implementation") {
+    return "Arc Explorer Implementation ABI";
+  }
+
+  if (abiSource === "contract") {
+    return "Arc Explorer Contract ABI";
+  }
+
+  return "Arc Explorer ABI";
+}
 
 export async function detectOwnership(
   address: `0x${string}`,
   options: DetectOwnershipOptions
 ): Promise<OwnershipFinding> {
+  const interfaceSource =
+    getExplorerEvidenceSource(
+      options.abiSource
+    );
+
   if (options.hasOwnerFunction === false) {
     return {
       id: "A1",
-      name: "Privileged Owner",
+      name: "Active Ownership",
       status: "not_detected",
       severity: "low",
       scoreImpact: 0,
@@ -56,10 +94,11 @@ export async function detectOwnership(
       evidence: {
         type: "verified_abi",
         method: "owner()",
-        source: "Arc Explorer ABI",
+        source: interfaceSource,
+        interfaceSource,
       },
       explanation:
-        "The verified ABI does not expose the standard owner() interface. This does not rule out other administrative control mechanisms.",
+        "No standard owner() interface was identified in the analyzed ABI. This does not rule out other ownership or administrative mechanisms.",
     };
   }
 
@@ -70,12 +109,14 @@ export async function detectOwnership(
       functionName: "owner",
     });
 
-    const renounced = owner.toLowerCase() === zeroAddress.toLowerCase();
+    const renounced =
+      owner.toLowerCase() ===
+      zeroAddress.toLowerCase();
 
     if (renounced) {
       return {
         id: "A1",
-        name: "Privileged Owner",
+        name: "Active Ownership",
         status: "not_detected",
         severity: "low",
         scoreImpact: 0,
@@ -83,24 +124,22 @@ export async function detectOwnership(
         ownerAddress: owner,
         renounced: true,
         evidence: {
-          type:
-            options.hasOwnerFunction === true
-              ? "verified_abi"
-              : "rpc_call",
+          type: "rpc_call",
           method: "owner()",
-          source:
+          source: "Arc Mainnet RPC",
+          interfaceSource:
             options.hasOwnerFunction === true
-              ? "Arc Explorer ABI"
-              : "Arc Mainnet RPC",
+              ? interfaceSource
+              : null,
         },
         explanation:
-          "The contract exposes owner(), but ownership is set to the zero address.",
+          "owner() returned the zero address, indicating ownership is renounced under the standard owner() interface. This does not rule out other administrative mechanisms.",
       };
     }
 
     return {
       id: "A1",
-      name: "Privileged Owner",
+      name: "Active Ownership",
       status: "detected",
       severity: "medium",
       scoreImpact: 5,
@@ -108,23 +147,21 @@ export async function detectOwnership(
       ownerAddress: owner,
       renounced: false,
       evidence: {
-        type:
-          options.hasOwnerFunction === true
-            ? "verified_abi"
-            : "rpc_call",
+        type: "rpc_call",
         method: "owner()",
-        source:
+        source: "Arc Mainnet RPC",
+        interfaceSource:
           options.hasOwnerFunction === true
-            ? "Arc Explorer ABI"
-            : "Arc Mainnet RPC",
+            ? interfaceSource
+            : null,
       },
       explanation:
-        "The contract exposes an active owner address with privileged control.",
+        "owner() returned a non-zero address, indicating active ownership under the standard owner() interface. The permissions associated with that owner depend on the contract implementation.",
     };
   } catch {
     return {
       id: "A1",
-      name: "Privileged Owner",
+      name: "Active Ownership",
       status: "unknown",
       severity: "low",
       scoreImpact: 0,
@@ -135,9 +172,13 @@ export async function detectOwnership(
         type: "rpc_call",
         method: "owner()",
         source: "Arc Mainnet RPC",
+        interfaceSource:
+          options.hasOwnerFunction === true
+            ? interfaceSource
+            : null,
       },
       explanation:
-        "Cerynq could not confirm the standard owner() interface. Other administrative control mechanisms may still exist.",
+        "Cerynq could not resolve owner() through Arc Mainnet RPC, so the ownership state could not be classified from the available evidence.",
     };
   }
 }

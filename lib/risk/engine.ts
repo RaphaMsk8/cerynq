@@ -8,6 +8,11 @@ export type RiskFindingConfidence =
   | "medium"
   | "low";
 
+export type RiskAssessmentStatus =
+  | "complete"
+  | "partial"
+  | "insufficient";
+
 export type RiskFindingInput = {
   id: string;
   status: RiskFindingStatus;
@@ -24,6 +29,7 @@ export type RiskLevel =
 
 export type RiskEngineResult = {
   version: "0.1";
+  assessmentStatus: RiskAssessmentStatus;
   rawScore: number;
   maxScore: number;
   normalizedScore: number;
@@ -59,14 +65,28 @@ function getRiskLevel(
   return "low";
 }
 
-function getAggregateConfidence(
-  coveragePercentage: number,
-  findings: RiskFindingInput[]
-): RiskFindingConfidence {
-  if (findings.length === 0) {
-    return "low";
+function getAssessmentStatus(
+  totalFindings: number,
+  knownFindings: number,
+  unknownFindings: number
+): RiskAssessmentStatus {
+  if (
+    totalFindings === 0 ||
+    knownFindings === 0
+  ) {
+    return "insufficient";
   }
 
+  if (unknownFindings > 0) {
+    return "partial";
+  }
+
+  return "complete";
+}
+
+function getEvidenceConfidence(
+  findings: RiskFindingInput[]
+): RiskFindingConfidence {
   const knownFindings = findings.filter(
     (finding) => finding.status !== "unknown"
   );
@@ -79,26 +99,21 @@ function getAggregateConfidence(
     (finding) => finding.confidence === "low"
   );
 
-  const hasMediumConfidence = knownFindings.some(
-    (finding) => finding.confidence === "medium"
-  );
-
-  if (
-    coveragePercentage >= 80 &&
-    !hasLowConfidence &&
-    !hasMediumConfidence
-  ) {
-    return "high";
+  if (hasLowConfidence) {
+    return "low";
   }
 
-  if (
-    coveragePercentage >= 50 &&
-    !hasLowConfidence
-  ) {
+  const hasMediumConfidence =
+    knownFindings.some(
+      (finding) =>
+        finding.confidence === "medium"
+    );
+
+  if (hasMediumConfidence) {
     return "medium";
   }
 
-  return "low";
+  return "high";
 }
 
 export function calculateRisk(
@@ -116,13 +131,22 @@ export function calculateRisk(
   const coveragePercentage =
     totalFindings > 0
       ? Math.round(
-          (knownFindings / totalFindings) * 100
+          (knownFindings / totalFindings) *
+            100
         )
       : 0;
 
+  const assessmentStatus =
+    getAssessmentStatus(
+      totalFindings,
+      knownFindings,
+      unknownFindings.length
+    );
+
   const rawScore = findings
     .filter(
-      (finding) => finding.status === "detected"
+      (finding) =>
+        finding.status === "detected"
     )
     .reduce(
       (total, finding) =>
@@ -138,19 +162,17 @@ export function calculateRisk(
   );
 
   const riskLevel =
-  coveragePercentage === 0
-    ? "unknown"
-    : getRiskLevel(normalizedScore);
+    assessmentStatus === "complete"
+      ? getRiskLevel(normalizedScore)
+      : "unknown";
 
   const confidence =
-    getAggregateConfidence(
-      coveragePercentage,
-      findings
-    );
+    getEvidenceConfidence(findings);
 
   const detectedFindings = findings
     .filter(
-      (finding) => finding.status === "detected"
+      (finding) =>
+        finding.status === "detected"
     )
     .map((finding) => finding.id);
 
@@ -158,20 +180,25 @@ export function calculateRisk(
 
   if (totalFindings === 0) {
     explanation =
-      "Cerynq could not calculate contract risk because no findings were available.";
-  } else if (coveragePercentage === 0) {
+      "Cerynq could not produce an assessment because no risk findings were available.";
+  } else if (
+    assessmentStatus === "insufficient"
+  ) {
     explanation =
-      "Cerynq could not determine the current risk level because all evaluated findings are unknown.";
-  } else if (unknownFindings.length > 0) {
+      "Cerynq could not determine a risk level because none of the current model checks could be resolved with the available evidence.";
+  } else if (
+    assessmentStatus === "partial"
+  ) {
     explanation =
-      "The risk score is based on the findings Cerynq could evaluate. Some controls remain unknown, so the score should be interpreted together with coverage and confidence.";
+      "The observed score reflects only the checks Cerynq could resolve. One or more checks remain unknown, so the overall risk level is not classified.";
   } else {
     explanation =
-      "The risk score summarizes the currently evaluated privileged-control findings. All findings in the current risk model were successfully evaluated.";
+      "The score summarizes the privileged-control signals evaluated by the current Cerynq risk model. All current model checks produced known results.";
   }
 
   return {
     version: "0.1",
+    assessmentStatus,
     rawScore,
     maxScore: CURRENT_MAX_SCORE,
     normalizedScore,
