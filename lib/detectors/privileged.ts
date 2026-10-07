@@ -17,6 +17,11 @@ type AbiSource =
   | "implementation"
   | null;
 
+type AbiEvidenceQuality =
+  | "full"
+  | "limited"
+  | "unknown";
+
 export type PrivilegedFinding = {
   id: "A5";
   name: "Other Privileged Controls";
@@ -28,7 +33,10 @@ export type PrivilegedFinding = {
   scoreImpact: number;
   confidence: "high" | "medium" | "low";
   evidence: {
-    type: "verified_abi";
+    type:
+      | "fully_verified_abi"
+      | "limited_abi"
+      | "abi_unavailable";
     methods: string[];
     source:
       | "Arc Explorer Contract ABI"
@@ -41,6 +49,7 @@ export type PrivilegedFinding = {
 type DetectPrivilegedOptions = {
   abi: AbiItem[] | null;
   abiSource: AbiSource;
+  abiEvidenceQuality: AbiEvidenceQuality;
 };
 
 function getEvidenceSource(
@@ -55,6 +64,21 @@ function getEvidenceSource(
   }
 
   return "Arc Explorer ABI";
+}
+
+function getEvidenceType(
+  abi: AbiItem[] | null,
+  abiEvidenceQuality: AbiEvidenceQuality
+): PrivilegedFinding["evidence"]["type"] {
+  if (abi === null) {
+    return "abi_unavailable";
+  }
+
+  if (abiEvidenceQuality === "full") {
+    return "fully_verified_abi";
+  }
+
+  return "limited_abi";
 }
 
 const administrativeMethodNames = new Set([
@@ -79,7 +103,9 @@ function normalizeMethodName(
   return name.toLowerCase();
 }
 
-function isReadOnly(item: AbiItem): boolean {
+function isReadOnly(
+  item: AbiItem
+): boolean {
   return (
     item.stateMutability === "view" ||
     item.stateMutability === "pure"
@@ -89,10 +115,20 @@ function isReadOnly(item: AbiItem): boolean {
 export function detectOtherPrivilegedControls(
   options: DetectPrivilegedOptions
 ): PrivilegedFinding {
-  const { abi, abiSource } = options;
+  const {
+    abi,
+    abiSource,
+    abiEvidenceQuality,
+  } = options;
 
   const evidenceSource =
     getEvidenceSource(abiSource);
+
+  const evidenceType =
+    getEvidenceType(
+      abi,
+      abiEvidenceQuality
+    );
 
   if (abi === null) {
     return {
@@ -103,7 +139,7 @@ export function detectOtherPrivilegedControls(
       scoreImpact: 0,
       confidence: "low",
       evidence: {
-        type: "verified_abi",
+        type: evidenceType,
         methods: [],
         source: evidenceSource,
       },
@@ -162,6 +198,8 @@ export function detectOtherPrivilegedControls(
       );
     });
 
+  // Positive interface evidence remains meaningful with
+  // limited ABI provenance, but confidence is reduced.
   if (stateChangingControls.length > 0) {
     return {
       id: "A5",
@@ -169,14 +207,41 @@ export function detectOtherPrivilegedControls(
       status: "detected",
       severity: "medium",
       scoreImpact: 3,
-      confidence: "high",
+      confidence:
+        abiEvidenceQuality === "full"
+          ? "high"
+          : "medium",
       evidence: {
-        type: "verified_abi",
+        type: evidenceType,
         methods: evidenceMethods,
         source: evidenceSource,
       },
       explanation:
-        "The analyzed ABI exposes supported state-changing administrative methods related to roles or administrative authority. Caller restrictions and runtime behavior are not determined by this detector.",
+        abiEvidenceQuality === "full"
+          ? "The analyzed ABI exposes supported state-changing administrative methods related to roles or administrative authority. Caller restrictions and runtime behavior are not determined by this detector."
+          : "The available ABI exposes supported state-changing administrative methods related to roles or administrative authority. This is a positive interface signal, but ABI provenance is limited, so caller restrictions and complete runtime behavior are not determined by this detector.",
+    };
+  }
+
+  // Absence from limited-provenance ABI data is not enough
+  // to classify a capability as absent.
+  if (abiEvidenceQuality !== "full") {
+    return {
+      id: "A5",
+      name: "Other Privileged Controls",
+      status: "unknown",
+      severity: "low",
+      scoreImpact: 0,
+      confidence: "medium",
+      evidence: {
+        type: evidenceType,
+        methods: evidenceMethods,
+        source: evidenceSource,
+      },
+      explanation:
+        evidenceMethods.length > 0
+          ? "Administrative interface signals were present in the available ABI, but no supported state-changing method for modifying roles or administrative authority was identified. Because the ABI provenance is limited, Cerynq cannot reliably classify the absence of other privileged controls."
+          : "No supported state-changing administrative methods were identified in the available ABI. Because the ABI provenance is limited, absence from this ABI is not sufficient evidence to conclude that other privileged controls are not present.",
     };
   }
 
@@ -189,12 +254,12 @@ export function detectOtherPrivilegedControls(
       scoreImpact: 0,
       confidence: "high",
       evidence: {
-        type: "verified_abi",
+        type: evidenceType,
         methods: evidenceMethods,
         source: evidenceSource,
       },
       explanation:
-        "Administrative interface signals were identified, but no supported state-changing methods for modifying roles or administrative authority were identified in the analyzed ABI.",
+        "Administrative interface signals were identified, but no supported state-changing methods for modifying roles or administrative authority were identified in the fully verified analyzed ABI.",
     };
   }
 
@@ -206,11 +271,11 @@ export function detectOtherPrivilegedControls(
     scoreImpact: 0,
     confidence: "high",
     evidence: {
-      type: "verified_abi",
+      type: evidenceType,
       methods: [],
       source: evidenceSource,
     },
     explanation:
-      "No supported state-changing methods for modifying roles or administrative authority were identified in the analyzed ABI.",
+      "No supported state-changing methods for modifying roles or administrative authority were identified in the fully verified analyzed ABI.",
   };
 }

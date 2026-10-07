@@ -25,30 +25,68 @@ type AddressInfo = {
 
 type SmartContractInfo = {
   name?: string | null;
+
+  is_verified?: boolean;
+  is_fully_verified?: boolean;
+  is_partially_verified?: boolean;
+  is_verified_via_sourcify?: boolean;
+  is_verified_via_eth_bytecode_db?: boolean;
+
   proxy_type?: string | null;
+
   implementations?: Array<{
     address_hash?: string;
     name?: string | null;
   }>;
-  abi?: AbiItem[] | null;
+
+  abi?: unknown;
 };
+
+export type ArcVerificationStatus =
+  | "fully_verified"
+  | "partially_verified"
+  | "verified"
+  | "unverified"
+  | "unknown";
+
+export type ArcAbiEvidenceQuality =
+  | "full"
+  | "limited"
+  | "unknown";
+
+export type ArcAbiSource =
+  | "contract"
+  | "implementation"
+  | null;
 
 export type ArcExplorerMetadata = {
   isContract: boolean | null;
-  isVerified: boolean | null;
+
+  verificationStatus: ArcVerificationStatus;
+
+  isVerifiedViaSourcify: boolean | null;
+  isVerifiedViaEthBytecodeDb: boolean | null;
+
   contractName: string | null;
 
   proxyType: string | null;
-  implementationAddress: string | null;
 
-  implementationIsVerified: boolean | null;
+  implementationAddress: string | null;
+  implementationAddresses: string[];
+  hasMultipleImplementations: boolean;
+
+  implementationVerificationStatus: ArcVerificationStatus;
+
+  implementationIsVerifiedViaSourcify: boolean | null;
+  implementationIsVerifiedViaEthBytecodeDb: boolean | null;
+
   implementationContractName: string | null;
 
   abi: AbiItem[] | null;
-  abiSource:
-    | "contract"
-    | "implementation"
-    | null;
+  abiSource: ArcAbiSource;
+
+  abiVerificationStatus: ArcVerificationStatus;
+  abiEvidenceQuality: ArcAbiEvidenceQuality;
 
   hasOwnerFunction: boolean | null;
 };
@@ -159,19 +197,129 @@ async function fetchSmartContractInfo(
   );
 }
 
+function normalizeBoolean(
+  value: unknown
+): boolean | null {
+  return typeof value === "boolean"
+    ? value
+    : null;
+}
+
+function normalizeAbi(
+  value: unknown
+): AbiItem[] | null {
+  if (!Array.isArray(value)) {
+    return null;
+  }
+
+  const normalized = value.filter(
+    (item): item is AbiItem =>
+      typeof item === "object" &&
+      item !== null
+  );
+
+  if (normalized.length === 0) {
+    return null;
+  }
+
+  return normalized;
+}
+
+function getVerificationStatus(
+  addressInfo: AddressInfo | null,
+  smartContractInfo: SmartContractInfo | null
+): ArcVerificationStatus {
+  if (
+    smartContractInfo?.is_fully_verified ===
+    true
+  ) {
+    return "fully_verified";
+  }
+
+  if (
+    smartContractInfo
+      ?.is_partially_verified === true
+  ) {
+    return "partially_verified";
+  }
+
+  const explicitVerification =
+    typeof smartContractInfo?.is_verified ===
+    "boolean"
+      ? smartContractInfo.is_verified
+      : addressInfo?.is_verified;
+
+  if (explicitVerification === false) {
+    return "unverified";
+  }
+
+  if (explicitVerification === true) {
+    return "verified";
+  }
+
+  return "unknown";
+}
+
+function getAbiEvidenceQuality(
+  abi: AbiItem[] | null,
+  verificationStatus: ArcVerificationStatus
+): ArcAbiEvidenceQuality {
+  if (abi === null) {
+    return "unknown";
+  }
+
+  if (
+    verificationStatus ===
+    "fully_verified"
+  ) {
+    return "full";
+  }
+
+  return "limited";
+}
+
+function getImplementationAddresses(
+  smartContractInfo: SmartContractInfo | null
+): string[] {
+  const addresses =
+    smartContractInfo?.implementations
+      ?.map(
+        (implementation) =>
+          implementation.address_hash
+      )
+      .filter(
+        (address): address is string =>
+          typeof address === "string" &&
+          address.length > 0
+      ) ?? [];
+
+  return [...new Set(addresses)];
+}
+
 function detectOwnerFunction(
-  abi: AbiItem[] | null
-) {
+  abi: AbiItem[] | null,
+  abiEvidenceQuality: ArcAbiEvidenceQuality
+): boolean | null {
   if (abi === null) {
     return null;
   }
 
-  return abi.some(
+  const ownerFound = abi.some(
     (item) =>
       item.type === "function" &&
       item.name === "owner" &&
       (item.inputs?.length ?? 0) === 0
   );
+
+  if (ownerFound) {
+    return true;
+  }
+
+  if (abiEvidenceQuality === "full") {
+    return false;
+  }
+
+  return null;
 }
 
 export async function getArcExplorerMetadata(
@@ -179,11 +327,19 @@ export async function getArcExplorerMetadata(
 ): Promise<ArcExplorerMetadata> {
   const apiKey = getApiKey();
 
-  const addressInfo =
-    await fetchAddressInfo(
+  const [
+    addressInfo,
+    smartContractInfo,
+  ] = await Promise.all([
+    fetchAddressInfo(
       address,
       apiKey
-    );
+    ),
+    fetchSmartContractInfo(
+      address,
+      apiKey
+    ),
+  ]);
 
   if (addressInfo === null) {
     throw new Error(
@@ -191,27 +347,31 @@ export async function getArcExplorerMetadata(
     );
   }
 
-  let smartContractInfo:
-    | SmartContractInfo
-    | null = null;
+  const verificationStatus =
+    getVerificationStatus(
+      addressInfo,
+      smartContractInfo
+    );
 
-  if (addressInfo.is_contract) {
-    smartContractInfo =
-      await fetchSmartContractInfo(
-        address,
-        apiKey
-      );
-  }
+  const contractAbi = normalizeAbi(
+    smartContractInfo?.abi
+  );
 
   const proxyType =
     smartContractInfo?.proxy_type ?? null;
 
-  const implementationAddress =
-    smartContractInfo?.implementations?.[0]
-      ?.address_hash ?? null;
+  const implementationAddresses =
+    getImplementationAddresses(
+      smartContractInfo
+    );
 
-  const contractAbi =
-    smartContractInfo?.abi ?? null;
+  const hasMultipleImplementations =
+    implementationAddresses.length > 1;
+
+  const implementationAddress =
+    implementationAddresses.length === 1
+      ? implementationAddresses[0]
+      : null;
 
   let implementationAddressInfo:
     | AddressInfo
@@ -222,48 +382,84 @@ export async function getArcExplorerMetadata(
     | null = null;
 
   if (implementationAddress) {
-    implementationAddressInfo =
-      await fetchAddressInfo(
+    [
+      implementationAddressInfo,
+      implementationSmartContractInfo,
+    ] = await Promise.all([
+      fetchAddressInfo(
         implementationAddress,
         apiKey
-      );
-
-    implementationSmartContractInfo =
-      await fetchSmartContractInfo(
+      ),
+      fetchSmartContractInfo(
         implementationAddress,
         apiKey
-      );
+      ),
+    ]);
   }
 
-  const implementationAbi =
-    implementationSmartContractInfo?.abi ??
-    null;
+  const implementationVerificationStatus =
+    getVerificationStatus(
+      implementationAddressInfo,
+      implementationSmartContractInfo
+    );
+
+  const implementationAbi = normalizeAbi(
+    implementationSmartContractInfo?.abi
+  );
 
   const effectiveAbi =
-    implementationAbi ?? contractAbi;
+    hasMultipleImplementations
+      ? null
+      : implementationAbi ??
+        contractAbi;
 
-  const abiSource =
-    implementationAbi !== null
-      ? "implementation"
-      : contractAbi !== null
-        ? "contract"
-        : null;
+  const abiSource: ArcAbiSource =
+    hasMultipleImplementations
+      ? null
+      : implementationAbi !== null
+        ? "implementation"
+        : contractAbi !== null
+          ? "contract"
+          : null;
+
+  const abiVerificationStatus =
+    abiSource === "implementation"
+      ? implementationVerificationStatus
+      : abiSource === "contract"
+        ? verificationStatus
+        : "unknown";
+
+  const abiEvidenceQuality =
+    getAbiEvidenceQuality(
+      effectiveAbi,
+      abiVerificationStatus
+    );
 
   const hasOwnerFunction =
-    detectOwnerFunction(effectiveAbi);
+    detectOwnerFunction(
+      effectiveAbi,
+      abiEvidenceQuality
+    );
 
   return {
     isContract:
-      typeof addressInfo.is_contract ===
-      "boolean"
-        ? addressInfo.is_contract
-        : null,
+      normalizeBoolean(
+        addressInfo.is_contract
+      ),
 
-    isVerified:
-      typeof addressInfo.is_verified ===
-      "boolean"
-        ? addressInfo.is_verified
-        : null,
+    verificationStatus,
+
+    isVerifiedViaSourcify:
+      normalizeBoolean(
+        smartContractInfo
+          ?.is_verified_via_sourcify
+      ),
+
+    isVerifiedViaEthBytecodeDb:
+      normalizeBoolean(
+        smartContractInfo
+          ?.is_verified_via_eth_bytecode_db
+      ),
 
     contractName:
       smartContractInfo?.name ??
@@ -274,11 +470,23 @@ export async function getArcExplorerMetadata(
 
     implementationAddress,
 
-    implementationIsVerified:
-      typeof implementationAddressInfo
-        ?.is_verified === "boolean"
-        ? implementationAddressInfo.is_verified
-        : null,
+    implementationAddresses,
+
+    hasMultipleImplementations,
+
+    implementationVerificationStatus,
+
+    implementationIsVerifiedViaSourcify:
+      normalizeBoolean(
+        implementationSmartContractInfo
+          ?.is_verified_via_sourcify
+      ),
+
+    implementationIsVerifiedViaEthBytecodeDb:
+      normalizeBoolean(
+        implementationSmartContractInfo
+          ?.is_verified_via_eth_bytecode_db
+      ),
 
     implementationContractName:
       implementationSmartContractInfo?.name ??
@@ -288,6 +496,10 @@ export async function getArcExplorerMetadata(
     abi: effectiveAbi,
 
     abiSource,
+
+    abiVerificationStatus,
+
+    abiEvidenceQuality,
 
     hasOwnerFunction,
   };

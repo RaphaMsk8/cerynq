@@ -17,6 +17,11 @@ type AbiSource =
   | "implementation"
   | null;
 
+type AbiEvidenceQuality =
+  | "full"
+  | "limited"
+  | "unknown";
+
 export type BlacklistFinding = {
   id: "A3";
   name: "Blacklist / Freeze Capability";
@@ -28,7 +33,10 @@ export type BlacklistFinding = {
   scoreImpact: number;
   confidence: "high" | "medium" | "low";
   evidence: {
-    type: "verified_abi";
+    type:
+      | "fully_verified_abi"
+      | "limited_abi"
+      | "abi_unavailable";
     methods: string[];
     source:
       | "Arc Explorer Contract ABI"
@@ -41,6 +49,7 @@ export type BlacklistFinding = {
 type DetectBlacklistOptions = {
   abi: AbiItem[] | null;
   abiSource: AbiSource;
+  abiEvidenceQuality: AbiEvidenceQuality;
 };
 
 function getEvidenceSource(
@@ -55,6 +64,21 @@ function getEvidenceSource(
   }
 
   return "Arc Explorer ABI";
+}
+
+function getEvidenceType(
+  abi: AbiItem[] | null,
+  abiEvidenceQuality: AbiEvidenceQuality
+): BlacklistFinding["evidence"]["type"] {
+  if (abi === null) {
+    return "abi_unavailable";
+  }
+
+  if (abiEvidenceQuality === "full") {
+    return "fully_verified_abi";
+  }
+
+  return "limited_abi";
 }
 
 const administrativeMethodNames = new Set([
@@ -85,7 +109,9 @@ function normalizeMethodName(
   return name.toLowerCase();
 }
 
-function isReadOnly(item: AbiItem): boolean {
+function isReadOnly(
+  item: AbiItem
+): boolean {
   return (
     item.stateMutability === "view" ||
     item.stateMutability === "pure"
@@ -95,10 +121,20 @@ function isReadOnly(item: AbiItem): boolean {
 export function detectBlacklistCapability(
   options: DetectBlacklistOptions
 ): BlacklistFinding {
-  const { abi, abiSource } = options;
+  const {
+    abi,
+    abiSource,
+    abiEvidenceQuality,
+  } = options;
 
   const evidenceSource =
     getEvidenceSource(abiSource);
+
+  const evidenceType =
+    getEvidenceType(
+      abi,
+      abiEvidenceQuality
+    );
 
   if (abi === null) {
     return {
@@ -109,7 +145,7 @@ export function detectBlacklistCapability(
       scoreImpact: 0,
       confidence: "low",
       evidence: {
-        type: "verified_abi",
+        type: evidenceType,
         methods: [],
         source: evidenceSource,
       },
@@ -168,6 +204,8 @@ export function detectBlacklistCapability(
       );
     });
 
+  // Positive interface evidence remains meaningful with
+  // limited ABI provenance, but confidence is reduced.
   if (stateChangingControls.length > 0) {
     return {
       id: "A3",
@@ -175,14 +213,41 @@ export function detectBlacklistCapability(
       status: "detected",
       severity: "medium",
       scoreImpact: 8,
-      confidence: "high",
+      confidence:
+        abiEvidenceQuality === "full"
+          ? "high"
+          : "medium",
       evidence: {
-        type: "verified_abi",
+        type: evidenceType,
         methods: evidenceMethods,
         source: evidenceSource,
       },
       explanation:
-        "The analyzed ABI exposes supported state-changing blacklist or freeze-related methods. These methods may support restricting specific addresses or accounts; caller restrictions and runtime behavior are not determined by this detector.",
+        abiEvidenceQuality === "full"
+          ? "The analyzed ABI exposes supported state-changing blacklist or freeze-related methods. These methods may support restricting specific addresses or accounts; caller restrictions and runtime behavior are not determined by this detector."
+          : "The available ABI exposes supported state-changing blacklist or freeze-related methods. This is a positive interface signal, but ABI provenance is limited, so caller restrictions and complete runtime behavior are not determined by this detector.",
+    };
+  }
+
+  // Absence from limited-provenance ABI data is not enough
+  // to classify a capability as absent.
+  if (abiEvidenceQuality !== "full") {
+    return {
+      id: "A3",
+      name: "Blacklist / Freeze Capability",
+      status: "unknown",
+      severity: "low",
+      scoreImpact: 0,
+      confidence: "medium",
+      evidence: {
+        type: evidenceType,
+        methods: evidenceMethods,
+        source: evidenceSource,
+      },
+      explanation:
+        evidenceMethods.length > 0
+          ? "Blacklist or freeze-related interface signals were present in the available ABI, but no supported state-changing administrative method was identified. Because the ABI provenance is limited, Cerynq cannot reliably classify the absence of blacklist or freeze capability."
+          : "No supported blacklist or freeze-related methods were identified in the available ABI. Because the ABI provenance is limited, absence from this ABI is not sufficient evidence to conclude that blacklist or freeze capability is not present.",
     };
   }
 
@@ -195,12 +260,12 @@ export function detectBlacklistCapability(
       scoreImpact: 0,
       confidence: "high",
       evidence: {
-        type: "verified_abi",
+        type: evidenceType,
         methods: evidenceMethods,
         source: evidenceSource,
       },
       explanation:
-        "Blacklist or freeze-related interface signals were identified, but no supported state-changing administrative methods were identified in the analyzed ABI.",
+        "Blacklist or freeze-related interface signals were identified, but no supported state-changing administrative methods were identified in the fully verified analyzed ABI.",
     };
   }
 
@@ -212,11 +277,11 @@ export function detectBlacklistCapability(
     scoreImpact: 0,
     confidence: "high",
     evidence: {
-      type: "verified_abi",
+      type: evidenceType,
       methods: [],
       source: evidenceSource,
     },
     explanation:
-      "No supported state-changing blacklist or freeze-related methods were identified in the analyzed ABI.",
+      "No supported state-changing blacklist or freeze-related methods were identified in the fully verified analyzed ABI.",
   };
 }

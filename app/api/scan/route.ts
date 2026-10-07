@@ -1,17 +1,21 @@
 import { NextResponse } from "next/server";
+
 import {
   getAddress,
   isAddress,
 } from "viem";
+
 import { z } from "zod";
 
 import { arcClient } from "@/lib/arc/client";
 import { getArcExplorerMetadata } from "@/lib/arc/explorer";
+
 import { detectOwnership } from "@/lib/detectors/ownership";
 import { detectPauseCapability } from "@/lib/detectors/pause";
 import { detectBlacklistCapability } from "@/lib/detectors/blacklist";
 import { detectWhitelistCapability } from "@/lib/detectors/whitelist";
 import { detectOtherPrivilegedControls } from "@/lib/detectors/privileged";
+
 import { calculateRisk } from "@/lib/risk/engine";
 
 const MAX_BODY_BYTES = 1024;
@@ -41,6 +45,13 @@ const scanSchema = z
   })
   .strict();
 
+class RequestBodyTooLargeError extends Error {
+  constructor() {
+    super("Request body is too large");
+    this.name = "RequestBodyTooLargeError";
+  }
+}
+
 function jsonResponse(
   body: unknown,
   init?: ResponseInit
@@ -53,11 +64,6 @@ function jsonResponse(
   response.headers.set(
     "Cache-Control",
     "no-store"
-  );
-
-  response.headers.set(
-    "X-Content-Type-Options",
-    "nosniff"
   );
 
   return response;
@@ -112,7 +118,6 @@ function checkRateLimit(
   if (!ip) {
     return {
       allowed: true,
-      remaining: null,
       retryAfter: null,
     };
   }
@@ -137,8 +142,6 @@ function checkRateLimit(
 
     return {
       allowed: true,
-      remaining:
-        RATE_LIMIT_MAX_REQUESTS - 1,
       retryAfter: null,
     };
   }
@@ -149,7 +152,6 @@ function checkRateLimit(
   ) {
     return {
       allowed: false,
-      remaining: 0,
       retryAfter: Math.max(
         1,
         Math.ceil(
@@ -164,11 +166,63 @@ function checkRateLimit(
 
   return {
     allowed: true,
-    remaining:
-      RATE_LIMIT_MAX_REQUESTS -
-      existing.count,
     retryAfter: null,
   };
+}
+
+async function readRequestBodyWithLimit(
+  request: Request,
+  maxBytes: number
+): Promise<string> {
+  const reader =
+    request.body?.getReader();
+
+  if (!reader) {
+    return "";
+  }
+
+  const decoder = new TextDecoder();
+
+  let totalBytes = 0;
+  let rawBody = "";
+
+  try {
+    while (true) {
+      const {
+        done,
+        value,
+      } = await reader.read();
+
+      if (done) {
+        break;
+      }
+
+      totalBytes += value.byteLength;
+
+      if (totalBytes > maxBytes) {
+        try {
+          await reader.cancel();
+        } catch {
+          // The request is already being rejected.
+        }
+
+        throw new RequestBodyTooLargeError();
+      }
+
+      rawBody += decoder.decode(
+        value,
+        {
+          stream: true,
+        }
+      );
+    }
+
+    rawBody += decoder.decode();
+
+    return rawBody;
+  } finally {
+    reader.releaseLock();
+  }
 }
 
 export async function POST(
@@ -235,45 +289,56 @@ export async function POST(
         "content-length"
       );
 
-    if (
-      contentLength &&
-      Number(contentLength) >
-        MAX_BODY_BYTES
-    ) {
-      return jsonResponse(
-        {
-          ok: false,
-          error:
-            "Request body is too large",
-        },
-        {
-          status: 413,
-        }
-      );
+    if (contentLength) {
+      const parsedContentLength =
+        Number(contentLength);
+
+      if (
+        Number.isFinite(
+          parsedContentLength
+        ) &&
+        parsedContentLength >
+          MAX_BODY_BYTES
+      ) {
+        return jsonResponse(
+          {
+            ok: false,
+            error:
+              "Request body is too large",
+          },
+          {
+            status: 413,
+          }
+        );
+      }
     }
 
-    const rawBody =
-      await request.text();
+    let rawBody: string;
 
-    const bodySize =
-      new TextEncoder().encode(
-        rawBody
-      ).byteLength;
+    try {
+      rawBody =
+        await readRequestBodyWithLimit(
+          request,
+          MAX_BODY_BYTES
+        );
+    } catch (error) {
+      if (
+        error instanceof
+        RequestBodyTooLargeError
+      ) {
+        return jsonResponse(
+          {
+            ok: false,
+            error:
+              "Request body is too large",
+          },
+          {
+            status: 413,
+          }
+        );
+      }
 
-    if (
-      bodySize >
-      MAX_BODY_BYTES
-    ) {
-      return jsonResponse(
-        {
-          ok: false,
-          error:
-            "Request body is too large",
-        },
-        {
-          status: 413,
-        }
-      );
+      throw error;
     }
 
     let body: unknown;
@@ -314,24 +379,25 @@ export async function POST(
         parsed.data.address
       );
 
-    const bytecode =
-      await arcClient.getBytecode({
+    const [
+      bytecode,
+      explorerMetadata,
+    ] = await Promise.all([
+      arcClient.getBytecode({
         address,
-      });
+      }),
 
-    let explorerMetadata = null;
-
-    try {
-      explorerMetadata =
-        await getArcExplorerMetadata(
-          address
+      getArcExplorerMetadata(
+        address
+      ).catch((error) => {
+        console.error(
+          "Arc Explorer metadata error:",
+          error
         );
-    } catch (error) {
-      console.error(
-        "Arc Explorer metadata error:",
-        error
-      );
-    }
+
+        return null;
+      }),
+    ]);
 
     const isContract = Boolean(
       bytecode &&
@@ -347,6 +413,18 @@ export async function POST(
           )
         : 0;
 
+    const abi =
+      explorerMetadata?.abi ?? null;
+
+    const abiSource =
+      explorerMetadata?.abiSource ??
+      null;
+
+    const abiEvidenceQuality =
+      explorerMetadata
+        ?.abiEvidenceQuality ??
+      "unknown";
+
     const ownershipFinding =
       isContract
         ? await detectOwnership(
@@ -357,10 +435,7 @@ export async function POST(
                   ?.hasOwnerFunction ??
                 null,
 
-              abiSource:
-                explorerMetadata
-                  ?.abiSource ??
-                null,
+              abiSource,
             }
           )
         : null;
@@ -368,56 +443,36 @@ export async function POST(
     const pauseFinding =
       isContract
         ? detectPauseCapability({
-            abi:
-              explorerMetadata?.abi ??
-              null,
-
-            abiSource:
-              explorerMetadata
-                ?.abiSource ??
-              null,
+            abi,
+            abiSource,
+            abiEvidenceQuality,
           })
         : null;
 
     const blacklistFinding =
       isContract
         ? detectBlacklistCapability({
-            abi:
-              explorerMetadata?.abi ??
-              null,
-
-            abiSource:
-              explorerMetadata
-                ?.abiSource ??
-              null,
+            abi,
+            abiSource,
+            abiEvidenceQuality,
           })
         : null;
 
     const whitelistFinding =
       isContract
         ? detectWhitelistCapability({
-            abi:
-              explorerMetadata?.abi ??
-              null,
-
-            abiSource:
-              explorerMetadata
-                ?.abiSource ??
-              null,
+            abi,
+            abiSource,
+            abiEvidenceQuality,
           })
         : null;
 
     const privilegedFinding =
       isContract
         ? detectOtherPrivilegedControls({
-            abi:
-              explorerMetadata?.abi ??
-              null,
-
-            abiSource:
-              explorerMetadata
-                ?.abiSource ??
-              null,
+            abi,
+            abiSource,
+            abiEvidenceQuality,
           })
         : null;
 
@@ -443,11 +498,14 @@ export async function POST(
       chainId: 5042,
       address,
       isContract,
+
       contractType: isContract
         ? "contract"
         : "eoa",
+
       bytecodeDetected:
         isContract,
+
       bytecodeSize,
 
       explorer: {
@@ -455,9 +513,19 @@ export async function POST(
           explorerMetadata !==
           null,
 
-        isVerified:
+        verificationStatus:
           explorerMetadata
-            ?.isVerified ??
+            ?.verificationStatus ??
+          "unknown",
+
+        isVerifiedViaSourcify:
+          explorerMetadata
+            ?.isVerifiedViaSourcify ??
+          null,
+
+        isVerifiedViaEthBytecodeDb:
+          explorerMetadata
+            ?.isVerifiedViaEthBytecodeDb ??
           null,
 
         contractName:
@@ -475,9 +543,29 @@ export async function POST(
             ?.implementationAddress ??
           null,
 
-        implementationIsVerified:
+        implementationAddresses:
           explorerMetadata
-            ?.implementationIsVerified ??
+            ?.implementationAddresses ??
+          [],
+
+        hasMultipleImplementations:
+          explorerMetadata
+            ?.hasMultipleImplementations ??
+          false,
+
+        implementationVerificationStatus:
+          explorerMetadata
+            ?.implementationVerificationStatus ??
+          "unknown",
+
+        implementationIsVerifiedViaSourcify:
+          explorerMetadata
+            ?.implementationIsVerifiedViaSourcify ??
+          null,
+
+        implementationIsVerifiedViaEthBytecodeDb:
+          explorerMetadata
+            ?.implementationIsVerifiedViaEthBytecodeDb ??
           null,
 
         implementationContractName:
@@ -487,14 +575,18 @@ export async function POST(
 
         abiAvailable:
           explorerMetadata?.abi !==
-          null &&
+            null &&
           explorerMetadata?.abi !==
             undefined,
 
-        abiSource:
+        abiSource,
+
+        abiVerificationStatus:
           explorerMetadata
-            ?.abiSource ??
-          null,
+            ?.abiVerificationStatus ??
+          "unknown",
+
+        abiEvidenceQuality,
 
         hasOwnerFunction:
           explorerMetadata
