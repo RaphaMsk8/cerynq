@@ -8,7 +8,7 @@ import {
 import { z } from "zod";
 
 import { arcClient } from "@/lib/arc/client";
-import { getArcExplorerMetadata } from "@/lib/arc/explorer";
+import { resolveArcEvidence } from "@/lib/arc/resolver";
 
 import { detectOwnership } from "@/lib/detectors/ownership";
 import { detectPauseCapability } from "@/lib/detectors/pause";
@@ -27,6 +27,12 @@ type RateLimitRecord = {
   count: number;
   resetAt: number;
 };
+
+type OperationalStatus =
+  | "normal"
+  | "degraded"
+  | "limited"
+  | "unavailable";
 
 const rateLimitStore = new Map<
   string,
@@ -48,7 +54,9 @@ const scanSchema = z
 class RequestBodyTooLargeError extends Error {
   constructor() {
     super("Request body is too large");
-    this.name = "RequestBodyTooLargeError";
+
+    this.name =
+      "RequestBodyTooLargeError";
   }
 }
 
@@ -56,10 +64,11 @@ function jsonResponse(
   body: unknown,
   init?: ResponseInit
 ) {
-  const response = NextResponse.json(
-    body,
-    init
-  );
+  const response =
+    NextResponse.json(
+      body,
+      init
+    );
 
   response.headers.set(
     "Cache-Control",
@@ -81,20 +90,29 @@ function getClientIp(
     return (
       forwardedFor
         .split(",")[0]
-        ?.trim() ?? null
+        ?.trim() ??
+      null
     );
   }
 
   const realIp =
-    request.headers.get("x-real-ip");
+    request.headers.get(
+      "x-real-ip"
+    );
 
-  return realIp?.trim() || null;
+  return (
+    realIp?.trim() ||
+    null
+  );
 }
 
 function cleanupRateLimitStore(
   now: number
 ) {
-  if (rateLimitStore.size < 5000) {
+  if (
+    rateLimitStore.size <
+    5000
+  ) {
     return;
   }
 
@@ -102,12 +120,19 @@ function cleanupRateLimitStore(
     ip,
     record,
   ] of rateLimitStore) {
-    if (record.resetAt <= now) {
-      rateLimitStore.delete(ip);
+    if (
+      record.resetAt <= now
+    ) {
+      rateLimitStore.delete(
+        ip
+      );
     }
   }
 
-  if (rateLimitStore.size > 10_000) {
+  if (
+    rateLimitStore.size >
+    10_000
+  ) {
     rateLimitStore.clear();
   }
 }
@@ -122,9 +147,12 @@ function checkRateLimit(
     };
   }
 
-  const now = Date.now();
+  const now =
+    Date.now();
 
-  cleanupRateLimitStore(now);
+  cleanupRateLimitStore(
+    now
+  );
 
   const existing =
     rateLimitStore.get(ip);
@@ -133,12 +161,16 @@ function checkRateLimit(
     !existing ||
     existing.resetAt <= now
   ) {
-    rateLimitStore.set(ip, {
-      count: 1,
-      resetAt:
-        now +
-        RATE_LIMIT_WINDOW_MS,
-    });
+    rateLimitStore.set(
+      ip,
+      {
+        count: 1,
+
+        resetAt:
+          now +
+          RATE_LIMIT_WINDOW_MS,
+      }
+    );
 
     return {
       allowed: true,
@@ -152,13 +184,18 @@ function checkRateLimit(
   ) {
     return {
       allowed: false,
-      retryAfter: Math.max(
-        1,
-        Math.ceil(
-          (existing.resetAt - now) /
-            1000
-        )
-      ),
+
+      retryAfter:
+        Math.max(
+          1,
+          Math.ceil(
+            (
+              existing.resetAt -
+              now
+            ) /
+              1000
+          )
+        ),
     };
   }
 
@@ -175,15 +212,18 @@ async function readRequestBodyWithLimit(
   maxBytes: number
 ): Promise<string> {
   const reader =
-    request.body?.getReader();
+    request.body
+      ?.getReader();
 
   if (!reader) {
     return "";
   }
 
-  const decoder = new TextDecoder();
+  const decoder =
+    new TextDecoder();
 
   let totalBytes = 0;
+
   let rawBody = "";
 
   try {
@@ -191,15 +231,20 @@ async function readRequestBodyWithLimit(
       const {
         done,
         value,
-      } = await reader.read();
+      } =
+        await reader.read();
 
       if (done) {
         break;
       }
 
-      totalBytes += value.byteLength;
+      totalBytes +=
+        value.byteLength;
 
-      if (totalBytes > maxBytes) {
+      if (
+        totalBytes >
+        maxBytes
+      ) {
         try {
           await reader.cancel();
         } catch {
@@ -209,20 +254,50 @@ async function readRequestBodyWithLimit(
         throw new RequestBodyTooLargeError();
       }
 
-      rawBody += decoder.decode(
-        value,
-        {
-          stream: true,
-        }
-      );
+      rawBody +=
+        decoder.decode(
+          value,
+          {
+            stream: true,
+          }
+        );
     }
 
-    rawBody += decoder.decode();
+    rawBody +=
+      decoder.decode();
 
     return rawBody;
   } finally {
     reader.releaseLock();
   }
+}
+
+function getOperationalStatus(
+  isContract: boolean,
+  abiProvider:
+    | "blockscout"
+    | "sourcify"
+    | null
+): OperationalStatus {
+  if (!isContract) {
+    return "normal";
+  }
+
+  if (
+    abiProvider ===
+    "blockscout"
+  ) {
+    return "normal";
+  }
+
+  if (
+    abiProvider ===
+    "sourcify"
+  ) {
+    return "degraded";
+  }
+
+  return "limited";
 }
 
 export async function POST(
@@ -231,23 +306,30 @@ export async function POST(
   try {
     const rateLimit =
       checkRateLimit(
-        getClientIp(request)
+        getClientIp(
+          request
+        )
       );
 
-    if (!rateLimit.allowed) {
-      const response = jsonResponse(
-        {
-          ok: false,
-          error:
-            "Too many scan requests. Please try again shortly.",
-        },
-        {
-          status: 429,
-        }
-      );
+    if (
+      !rateLimit.allowed
+    ) {
+      const response =
+        jsonResponse(
+          {
+            ok: false,
+
+            error:
+              "Too many scan requests. Please try again shortly.",
+          },
+          {
+            status: 429,
+          }
+        );
 
       if (
-        rateLimit.retryAfter !== null
+        rateLimit.retryAfter !==
+        null
       ) {
         response.headers.set(
           "Retry-After",
@@ -275,6 +357,7 @@ export async function POST(
       return jsonResponse(
         {
           ok: false,
+
           error:
             "Content-Type must be application/json",
         },
@@ -291,7 +374,9 @@ export async function POST(
 
     if (contentLength) {
       const parsedContentLength =
-        Number(contentLength);
+        Number(
+          contentLength
+        );
 
       if (
         Number.isFinite(
@@ -303,6 +388,7 @@ export async function POST(
         return jsonResponse(
           {
             ok: false,
+
             error:
               "Request body is too large",
           },
@@ -329,6 +415,7 @@ export async function POST(
         return jsonResponse(
           {
             ok: false,
+
             error:
               "Request body is too large",
           },
@@ -344,11 +431,15 @@ export async function POST(
     let body: unknown;
 
     try {
-      body = JSON.parse(rawBody);
+      body =
+        JSON.parse(
+          rawBody
+        );
     } catch {
       return jsonResponse(
         {
           ok: false,
+
           error:
             "Invalid JSON body",
         },
@@ -359,12 +450,17 @@ export async function POST(
     }
 
     const parsed =
-      scanSchema.safeParse(body);
+      scanSchema.safeParse(
+        body
+      );
 
-    if (!parsed.success) {
+    if (
+      !parsed.success
+    ) {
       return jsonResponse(
         {
           ok: false,
+
           error:
             "Invalid address",
         },
@@ -379,61 +475,272 @@ export async function POST(
         parsed.data.address
       );
 
-    const [
-      bytecode,
-      explorerMetadata,
-    ] = await Promise.all([
-      arcClient.getBytecode({
-        address,
-      }),
+    let bytecode;
 
-      getArcExplorerMetadata(
-        address
-      ).catch((error) => {
-        console.error(
-          "Arc Explorer metadata error:",
-          error
+    try {
+      bytecode =
+        await arcClient.getBytecode(
+          {
+            address,
+          }
         );
+    } catch (error) {
+      console.error(
+        "Arc Mainnet RPC error:",
+        error
+      );
 
-        return null;
-      }),
-    ]);
+      return jsonResponse(
+        {
+          ok: false,
 
-    const isContract = Boolean(
-      bytecode &&
+          network:
+            "Arc Mainnet",
+
+          chainId:
+            5042,
+
+          address,
+
+          operationalStatus:
+            "unavailable",
+
+          error:
+            "Arc Mainnet is temporarily unavailable. Cerynq could not complete this scan.",
+        },
+        {
+          status: 503,
+        }
+      );
+    }
+
+    const isContract =
+      Boolean(
+        bytecode &&
         bytecode !== "0x"
-    );
+      );
 
     const bytecodeSize =
       bytecode
         ? Math.max(
-            (bytecode.length - 2) /
+            (
+              bytecode.length -
+              2
+            ) /
               2,
             0
           )
         : 0;
 
-    const abi =
-      explorerMetadata?.abi ?? null;
+    const evidenceResolution =
+      isContract
+        ? await resolveArcEvidence(
+            address,
+            bytecode
+          )
+        : null;
 
-    const abiSource =
-      explorerMetadata?.abiSource ??
+    const blockscoutMetadata =
+      evidenceResolution
+        ?.blockscout ??
       null;
 
-    const abiEvidenceQuality =
-      explorerMetadata
-        ?.abiEvidenceQuality ??
+    const sourcifyMetadata =
+      evidenceResolution
+        ?.sourcify ??
+      null;
+
+    const providerStates =
+      evidenceResolution
+        ?.providers ?? {
+        blockscout: {
+          status:
+            "not_used" as const,
+
+          usedForAbi:
+            false,
+        },
+
+        sourcify: {
+          status:
+            "not_used" as const,
+
+          usedForAbi:
+            false,
+        },
+      };
+
+    const onchainProxy =
+      evidenceResolution
+        ?.onchainProxy ??
+      null;
+
+    const abi =
+      evidenceResolution
+        ?.abiEvidence
+        .abi ??
+      null;
+
+    const abiProvider =
+      evidenceResolution
+        ?.abiEvidence
+        .provider ??
+      null;
+
+    const abiSource =
+      evidenceResolution
+        ?.abiEvidence
+        .source ??
+      null;
+
+    const abiVerificationStatus =
+      evidenceResolution
+        ?.abiEvidence
+        .verificationStatus ??
       "unknown";
+
+    const abiEvidenceQuality =
+      evidenceResolution
+        ?.abiEvidence
+        .quality ??
+      "unknown";
+
+    const hasOwnerFunction =
+      evidenceResolution
+        ?.hasOwnerFunction ??
+      null;
+
+    const proxyType =
+      onchainProxy
+        ?.proxyType ??
+      blockscoutMetadata
+        ?.proxyType ??
+      sourcifyMetadata
+        ?.proxyType ??
+      null;
+
+    const implementationAddress =
+      onchainProxy
+        ?.implementationAddress ??
+      blockscoutMetadata
+        ?.implementationAddress ??
+      null;
+
+    const implementationAddresses =
+      onchainProxy
+        ? [
+            onchainProxy
+              .implementationAddress,
+          ]
+        : blockscoutMetadata
+              ?.implementationAddresses
+              .length
+          ? blockscoutMetadata
+              .implementationAddresses
+          : implementationAddress
+            ? [
+                implementationAddress,
+              ]
+            : [];
+
+    const hasMultipleImplementations =
+      onchainProxy
+        ? false
+        : blockscoutMetadata
+            ?.hasMultipleImplementations ??
+          false;
+
+    const contractVerificationStatus =
+      abiProvider ===
+        "sourcify" &&
+      abiSource ===
+        "contract"
+        ? abiVerificationStatus
+        : blockscoutMetadata
+            ?.verificationStatus ??
+          "unknown";
+
+    const implementationVerificationStatus =
+      abiProvider ===
+        "sourcify" &&
+      abiSource ===
+        "implementation"
+        ? abiVerificationStatus
+        : blockscoutMetadata
+            ?.implementationVerificationStatus ??
+          "unknown";
+
+    const contractName =
+      blockscoutMetadata
+        ?.contractName ??
+      (
+        abiProvider ===
+          "sourcify" &&
+        abiSource ===
+          "contract"
+          ? sourcifyMetadata
+              ?.contractName
+          : null
+      ) ??
+      null;
+
+    const implementationContractName =
+      blockscoutMetadata
+        ?.implementationContractName ??
+      (
+        abiProvider ===
+          "sourcify" &&
+        abiSource ===
+          "implementation"
+          ? sourcifyMetadata
+              ?.contractName
+          : null
+      ) ??
+      null;
+
+    const operationalStatus =
+      getOperationalStatus(
+        isContract,
+        abiProvider
+      );
+
+    if (isContract) {
+      console.info(
+        "Cerynq evidence resolution:",
+        {
+          address,
+
+          operationalStatus,
+
+          abiProvider,
+
+          abiSource,
+
+          blockscout:
+            providerStates
+              .blockscout
+              .status,
+
+          sourcify:
+            providerStates
+              .sourcify
+              .status,
+
+          proxyType,
+
+          implementationAddress,
+        }
+      );
+    }
 
     const ownershipFinding =
       isContract
         ? await detectOwnership(
             address,
             {
-              hasOwnerFunction:
-                explorerMetadata
-                  ?.hasOwnerFunction ??
-                null,
+              hasOwnerFunction,
+
+              abiProvider,
 
               abiSource,
             }
@@ -442,38 +749,62 @@ export async function POST(
 
     const pauseFinding =
       isContract
-        ? detectPauseCapability({
-            abi,
-            abiSource,
-            abiEvidenceQuality,
-          })
+        ? detectPauseCapability(
+            {
+              abi,
+
+              abiProvider,
+
+              abiSource,
+
+              abiEvidenceQuality,
+            }
+          )
         : null;
 
     const blacklistFinding =
       isContract
-        ? detectBlacklistCapability({
-            abi,
-            abiSource,
-            abiEvidenceQuality,
-          })
+        ? detectBlacklistCapability(
+            {
+              abi,
+
+              abiProvider,
+
+              abiSource,
+
+              abiEvidenceQuality,
+            }
+          )
         : null;
 
     const whitelistFinding =
       isContract
-        ? detectWhitelistCapability({
-            abi,
-            abiSource,
-            abiEvidenceQuality,
-          })
+        ? detectWhitelistCapability(
+            {
+              abi,
+
+              abiProvider,
+
+              abiSource,
+
+              abiEvidenceQuality,
+            }
+          )
         : null;
 
     const privilegedFinding =
       isContract
-        ? detectOtherPrivilegedControls({
-            abi,
-            abiSource,
-            abiEvidenceQuality,
-          })
+        ? detectOtherPrivilegedControls(
+            {
+              abi,
+
+              abiProvider,
+
+              abiSource,
+
+              abiEvidenceQuality,
+            }
+          )
         : null;
 
     const risk =
@@ -485,111 +816,173 @@ export async function POST(
       privilegedFinding
         ? calculateRisk([
             ownershipFinding,
+
             pauseFinding,
+
             blacklistFinding,
+
             whitelistFinding,
+
             privilegedFinding,
           ])
         : null;
 
     return jsonResponse({
       ok: true,
-      network: "Arc Mainnet",
-      chainId: 5042,
+
+      network:
+        "Arc Mainnet",
+
+      chainId:
+        5042,
+
       address,
+
+      operationalStatus,
+
       isContract,
 
-      contractType: isContract
-        ? "contract"
-        : "eoa",
+      contractType:
+        isContract
+          ? "contract"
+          : "eoa",
 
       bytecodeDetected:
         isContract,
 
       bytecodeSize,
 
+      providers: {
+        blockscout:
+          providerStates
+            .blockscout,
+
+        sourcify:
+          providerStates
+            .sourcify,
+      },
+
+      intelligence: {
+        proxyType,
+
+        implementationAddress,
+
+        implementationAddresses,
+
+        hasMultipleImplementations,
+
+        contractName,
+
+        implementationContractName,
+
+        abiAvailable:
+          abi !== null,
+
+        abiProvider,
+
+        abiSource,
+
+        abiVerificationStatus,
+
+        abiEvidenceQuality,
+
+        hasOwnerFunction,
+
+        contractVerificationStatus,
+
+        implementationVerificationStatus,
+      },
+
       explorer: {
         available:
-          explorerMetadata !==
+          blockscoutMetadata !==
           null,
 
         verificationStatus:
-          explorerMetadata
+          blockscoutMetadata
             ?.verificationStatus ??
           "unknown",
 
         isVerifiedViaSourcify:
-          explorerMetadata
+          blockscoutMetadata
             ?.isVerifiedViaSourcify ??
           null,
 
         isVerifiedViaEthBytecodeDb:
-          explorerMetadata
+          blockscoutMetadata
             ?.isVerifiedViaEthBytecodeDb ??
           null,
 
         contractName:
-          explorerMetadata
+          blockscoutMetadata
             ?.contractName ??
           null,
 
         proxyType:
-          explorerMetadata
+          blockscoutMetadata
             ?.proxyType ??
           null,
 
         implementationAddress:
-          explorerMetadata
+          blockscoutMetadata
             ?.implementationAddress ??
           null,
 
         implementationAddresses:
-          explorerMetadata
+          blockscoutMetadata
             ?.implementationAddresses ??
           [],
 
         hasMultipleImplementations:
-          explorerMetadata
+          blockscoutMetadata
             ?.hasMultipleImplementations ??
           false,
 
         implementationVerificationStatus:
-          explorerMetadata
+          blockscoutMetadata
             ?.implementationVerificationStatus ??
           "unknown",
 
         implementationIsVerifiedViaSourcify:
-          explorerMetadata
+          blockscoutMetadata
             ?.implementationIsVerifiedViaSourcify ??
           null,
 
         implementationIsVerifiedViaEthBytecodeDb:
-          explorerMetadata
+          blockscoutMetadata
             ?.implementationIsVerifiedViaEthBytecodeDb ??
           null,
 
         implementationContractName:
-          explorerMetadata
+          blockscoutMetadata
             ?.implementationContractName ??
           null,
 
         abiAvailable:
-          explorerMetadata?.abi !==
-            null &&
-          explorerMetadata?.abi !==
-            undefined,
+          blockscoutMetadata
+            ?.abi !==
+          null &&
+          blockscoutMetadata
+            ?.abi !==
+          undefined,
 
-        abiSource,
+        abiSource:
+          blockscoutMetadata
+            ?.abiSource ??
+          null,
 
         abiVerificationStatus:
-          explorerMetadata
+          blockscoutMetadata
             ?.abiVerificationStatus ??
           "unknown",
 
-        abiEvidenceQuality,
+        abiEvidenceQuality:
+          blockscoutMetadata
+            ?.abiEvidenceQuality ??
+          "unknown",
 
         hasOwnerFunction:
-          explorerMetadata
+          blockscoutMetadata
             ?.hasOwnerFunction ??
           null,
       },
@@ -620,6 +1013,7 @@ export async function POST(
     return jsonResponse(
       {
         ok: false,
+
         error:
           "Unable to complete the scan",
       },

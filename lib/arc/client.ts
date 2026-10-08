@@ -3,10 +3,23 @@ import {
   http,
 } from "viem";
 
-const ARC_MAINNET_RPC_URL =
+const DEFAULT_ARC_MAINNET_RPC_URL =
   "https://rpc.mainnet.arc.io";
 
 const ARC_RPC_TIMEOUT_MS = 8_000;
+
+function getArcMainnetRpcUrl(): string {
+  const configuredRpcUrl =
+    process.env.ARC_MAINNET_RPC_URL?.trim();
+
+  return (
+    configuredRpcUrl ||
+    DEFAULT_ARC_MAINNET_RPC_URL
+  );
+}
+
+const arcMainnetRpcUrl =
+  getArcMainnetRpcUrl();
 
 const arcMainnet = {
   id: 5042,
@@ -19,7 +32,7 @@ const arcMainnet = {
   rpcUrls: {
     default: {
       http: [
-        ARC_MAINNET_RPC_URL,
+        arcMainnetRpcUrl,
       ],
     },
   },
@@ -30,7 +43,7 @@ export const arcClient =
     chain: arcMainnet,
 
     transport: http(
-      ARC_MAINNET_RPC_URL,
+      arcMainnetRpcUrl,
       {
         timeout:
           ARC_RPC_TIMEOUT_MS,

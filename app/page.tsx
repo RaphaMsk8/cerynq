@@ -174,100 +174,100 @@ type RiskResult = {
 
 
 
-type ScanResult = {
+type OperationalStatus =
+  | "normal"
+  | "degraded"
+  | "limited"
+  | "unavailable";
 
-  ok: boolean;
+type ProviderOperationalStatus =
+  | "available"
+  | "not_found"
+  | "rate_limited"
+  | "unauthorized"
+  | "timeout"
+  | "server_error"
+  | "network_error"
+  | "configuration_error"
+  | "invalid_response"
+  | "http_error"
+  | "error"
+  | "not_used";
 
-  network?: string;
-
-  chainId?: number;
-
-  address?: string;
-
-  isContract?: boolean;
-
-  contractType?: "contract" | "eoa";
-
-  bytecodeDetected?: boolean;
-
-  bytecodeSize?: number;
-
-
-
-  explorer?: {
-
-    available: boolean;
-
-
-    verificationStatus: VerificationStatus;
-
-    isVerifiedViaSourcify: boolean | null;
-
-    isVerifiedViaEthBytecodeDb: boolean | null;
-
-    contractName: string | null;
-
-    proxyType: string | null;
-
-    implementationAddress: string | null;
-
-    implementationAddresses: string[];
-
-    hasMultipleImplementations: boolean;
-
-
-    implementationVerificationStatus: VerificationStatus;
-
-    implementationIsVerifiedViaSourcify:
-      | boolean
-      | null;
-
-    implementationIsVerifiedViaEthBytecodeDb:
-      | boolean
-      | null;
-
-    implementationContractName: string | null;
-
-    abiAvailable: boolean;
-
-    abiSource:
-
-      | "contract"
-
-      | "implementation"
-
-      | null;
-
-    abiVerificationStatus: VerificationStatus;
-
-    abiEvidenceQuality: AbiEvidenceQuality;
-
-    hasOwnerFunction: boolean | null;
-
-  };
-
-
-
-  ownership?: OwnershipFinding | null;
-
-  pause?: BaseFinding | null;
-
-  blacklist?: BaseFinding | null;
-
-  whitelist?: BaseFinding | null;
-
-  privileged?: BaseFinding | null;
-
-
-
-  risk?: RiskResult | null;
-
-
-
-  error?: string;
-
+type ProviderState = {
+  status: ProviderOperationalStatus;
+  usedForAbi: boolean;
 };
 
+type AbiProvider =
+  | "blockscout"
+  | "sourcify"
+  | null;
+
+type AbiSource =
+  | "contract"
+  | "implementation"
+  | null;
+
+type IntelligenceResult = {
+  proxyType: string | null;
+  implementationAddress: string | null;
+  implementationAddresses: string[];
+  hasMultipleImplementations: boolean;
+  contractName: string | null;
+  implementationContractName: string | null;
+  abiAvailable: boolean;
+  abiProvider: AbiProvider;
+  abiSource: AbiSource;
+  abiVerificationStatus: VerificationStatus;
+  abiEvidenceQuality: AbiEvidenceQuality;
+  hasOwnerFunction: boolean | null;
+  contractVerificationStatus: VerificationStatus;
+  implementationVerificationStatus: VerificationStatus;
+};
+
+type ScanResult = {
+  ok: true;
+  network: string;
+  chainId: number;
+  address: string;
+  operationalStatus:
+    | "normal"
+    | "degraded"
+    | "limited";
+  isContract: boolean;
+  contractType: "contract" | "eoa";
+  bytecodeDetected: boolean;
+  bytecodeSize: number;
+
+  providers: {
+    blockscout: ProviderState;
+    sourcify: ProviderState;
+  };
+
+  intelligence: IntelligenceResult;
+
+  ownership: OwnershipFinding | null;
+  pause: BaseFinding | null;
+  blacklist: BaseFinding | null;
+  whitelist: BaseFinding | null;
+  privileged: BaseFinding | null;
+
+  risk: RiskResult | null;
+};
+
+type ScanErrorResult = {
+  ok: false;
+  network?: string;
+  chainId?: number;
+  address?: string;
+  operationalStatus?: OperationalStatus;
+  error?: string;
+};
+
+type ScanResponse =
+  | ScanResult
+  | ScanErrorResult;
 
 
 type InfoTooltipProps = {
@@ -688,42 +688,72 @@ function formatAbiEvidenceQuality(
 
 
 
-function formatVerificationChannels(
-
-  viaSourcify?: boolean | null,
-
-  viaBytecodeDb?: boolean | null
-
+function formatOperationalStatus(
+  status?: OperationalStatus
 ) {
-
-  const channels: string[] = [];
-
-
-
-  if (viaSourcify === true) {
-
-    channels.push("Sourcify");
-
+  if (status === "normal") {
+    return "Normal";
   }
 
-
-
-  if (viaBytecodeDb === true) {
-
-    channels.push("Bytecode DB");
-
+  if (status === "degraded") {
+    return "Degraded";
   }
 
+  if (status === "limited") {
+    return "Limited";
+  }
 
+  if (status === "unavailable") {
+    return "Unavailable";
+  }
 
-  return channels.length > 0
-
-    ? channels.join(", ")
-
-    : "Not reported";
-
+  return "Unknown";
 }
 
+function formatAbiProvider(
+  provider?: AbiProvider
+) {
+  if (provider === "blockscout") {
+    return "Blockscout";
+  }
+
+  if (provider === "sourcify") {
+    return "Sourcify";
+  }
+
+  return "Unavailable";
+}
+
+function formatProviderStatus(
+  status?: ProviderOperationalStatus
+) {
+  if (!status) {
+    return "Unknown";
+  }
+
+  return status
+    .replaceAll("_", " ")
+    .replace(/^./, (character) =>
+      character.toUpperCase()
+    );
+}
+
+function getOperationalStatusClasses(
+  status: Exclude<
+    OperationalStatus,
+    "unavailable"
+  >
+) {
+  if (status === "degraded") {
+    return "border-amber-900/50 bg-amber-950/20 text-amber-200/80";
+  }
+
+  if (status === "limited") {
+    return "border-sky-900/50 bg-sky-950/20 text-sky-200/80";
+  }
+
+  return "border-zinc-800 bg-zinc-950 text-zinc-300";
+}
 
 
 function formatEvidenceType(
@@ -952,6 +982,20 @@ function getEvidenceMethods(
 
   if (
 
+    finding.evidence.type ===
+
+    "abi_unavailable"
+
+  ) {
+
+    return "ABI unavailable";
+
+  }
+
+
+
+  if (
+
     finding.evidence.methods &&
 
     finding.evidence.methods.length > 0
@@ -1066,6 +1110,15 @@ export default function Home() {
 
 
 
+  const [
+    errorOperationalStatus,
+    setErrorOperationalStatus,
+  ] = useState<OperationalStatus | null>(
+    null
+  );
+
+
+
   async function handleSubmit(
 
     event: FormEvent<HTMLFormElement>
@@ -1079,6 +1132,8 @@ export default function Home() {
     setLoading(true);
 
     setError("");
+
+    setErrorOperationalStatus(null);
 
     setResult(null);
 
@@ -1114,13 +1169,17 @@ export default function Home() {
 
 
 
-      const data: ScanResult =
+      const data: ScanResponse =
 
         await response.json();
 
 
 
-      if (!response.ok) {
+      if (!data.ok) {
+        setErrorOperationalStatus(
+          data.operationalStatus ??
+            null
+        );
 
         setError(
 
@@ -1136,9 +1195,24 @@ export default function Home() {
 
 
 
+      if (!response.ok) {
+        setErrorOperationalStatus(null);
+
+        setError(
+          "Unable to analyze address."
+        );
+
+        return;
+
+      }
+
+
+
       setResult(data);
 
     } catch {
+
+      setErrorOperationalStatus(null);
 
       setError(
 
@@ -1153,6 +1227,7 @@ export default function Home() {
     }
 
   }
+
 
 
 
@@ -1356,6 +1431,10 @@ export default function Home() {
 
                     setError("");
 
+                    setErrorOperationalStatus(
+                      null
+                    );
+
                   }
 
                 }}
@@ -1420,9 +1499,27 @@ export default function Home() {
 
             {error && (
 
-              <div className="mt-5 rounded-lg border border-red-900/50 bg-red-950/30 p-4 text-left text-sm text-red-300">
+              <div className="mt-5 rounded-lg border border-red-900/50 bg-red-950/30 p-4 text-left">
 
-                {error}
+                {errorOperationalStatus ===
+                  "unavailable" && (
+                  <p className="text-xs font-medium uppercase tracking-[0.14em] text-red-300">
+
+                    Arc Mainnet unavailable
+
+                  </p>
+                )}
+
+                <p className={`text-sm text-red-300 ${
+                  errorOperationalStatus ===
+                  "unavailable"
+                    ? "mt-2"
+                    : ""
+                }`}>
+
+                  {error}
+
+                </p>
 
               </div>
 
@@ -1432,9 +1529,55 @@ export default function Home() {
 
 
 
-          {result?.ok && (
+          {result && (
 
             <div className="mt-8 space-y-6">
+
+              {result.operationalStatus !==
+                "normal" && (
+
+                <section
+                  className={`rounded-2xl border p-5 text-left ${getOperationalStatusClasses(
+                    result.operationalStatus
+                  )}`}
+                >
+
+                  <p className="text-xs font-medium uppercase tracking-[0.14em]">
+
+                    {formatOperationalStatus(
+                      result.operationalStatus
+                    )}{" "}
+                    evidence mode
+
+                  </p>
+
+                  <p className="mt-2 text-sm leading-6">
+
+                    {result.operationalStatus ===
+                    "degraded"
+                      ? "The primary metadata source was unavailable or did not provide usable ABI evidence. Cerynq completed this scan with fallback evidence from Sourcify."
+                      : "Arc Mainnet remained reachable, but no supported ABI evidence was available from Blockscout or Sourcify. ABI-based checks may remain Unknown."}
+
+                  </p>
+
+                  <p className="mt-2 text-xs opacity-70">
+
+                    Blockscout:{" "}
+                    {formatProviderStatus(
+                      result.providers
+                        .blockscout.status
+                    )}{" "}
+                    · Sourcify:{" "}
+                    {formatProviderStatus(
+                      result.providers
+                        .sourcify.status
+                    )}
+
+                  </p>
+
+                </section>
+
+              )}
 
               {!result.isContract && (
 
@@ -1842,9 +1985,9 @@ export default function Home() {
 
 
 
-                      {result.explorer
+                      {result.intelligence
 
-                        ?.abiEvidenceQuality ===
+                        .abiEvidenceQuality ===
 
                         "limited" && (
 
@@ -1952,9 +2095,9 @@ export default function Home() {
 
                     <h2 className="mt-2 text-xl font-medium">
 
-                      {result.explorer
+                      {result.intelligence
 
-                        ?.contractName ??
+                        .contractName ??
 
                         (result.isContract
 
@@ -2078,9 +2221,7 @@ export default function Home() {
 
                       <dd className="mt-1 text-zinc-200">
 
-                        {result.bytecodeSize ??
-
-                          0}{" "}
+                        {result.bytecodeSize}{" "}
 
                         bytes
 
@@ -2098,13 +2239,37 @@ export default function Home() {
 
                   <p className="text-xs uppercase tracking-[0.2em] text-zinc-500">
 
-                    Explorer Intelligence
+                    Evidence Intelligence
 
                   </p>
 
 
 
                   <div className="mt-5 grid grid-cols-1 gap-5 text-sm sm:grid-cols-2 lg:grid-cols-3">
+
+                    <div>
+
+                      <p className="text-zinc-500">
+
+                        Operational status
+
+                      </p>
+
+
+
+                      <p className="mt-1 text-zinc-200">
+
+                        {formatOperationalStatus(
+
+                          result.operationalStatus
+
+                        )}
+
+                      </p>
+
+                    </div>
+
+
 
                     <div>
 
@@ -2120,9 +2285,9 @@ export default function Home() {
 
                         {formatVerificationStatus(
 
-                          result.explorer
+                          result.intelligence
 
-                            ?.verificationStatus
+                            .contractVerificationStatus
 
                         )}
 
@@ -2146,9 +2311,35 @@ export default function Home() {
 
                         {formatProxyType(
 
-                          result.explorer
+                          result.intelligence
 
-                            ?.proxyType
+                            .proxyType
+
+                        )}
+
+                      </p>
+
+                    </div>
+
+
+
+                    <div>
+
+                      <p className="text-zinc-500">
+
+                        ABI provider
+
+                      </p>
+
+
+
+                      <p className="mt-1 text-zinc-200">
+
+                        {formatAbiProvider(
+
+                          result.intelligence
+
+                            .abiProvider
 
                         )}
 
@@ -2170,17 +2361,17 @@ export default function Home() {
 
                       <p className="mt-1 text-zinc-200">
 
-                        {result.explorer
+                        {result.intelligence
 
-                          ?.abiSource ===
+                          .abiSource ===
 
                         "implementation"
 
                           ? "Implementation"
 
-                          : result.explorer
+                          : result.intelligence
 
-                                ?.abiSource ===
+                                .abiSource ===
 
                               "contract"
 
@@ -2208,105 +2399,11 @@ export default function Home() {
 
                         {formatAbiEvidenceQuality(
 
-                          result.explorer
+                          result.intelligence
 
-                            ?.abiEvidenceQuality
+                            .abiEvidenceQuality
 
                         )}
-
-                      </p>
-
-                    </div>
-
-
-
-                    <div>
-
-                      <p className="text-zinc-500">
-
-                        Implementation verification
-
-                      </p>
-
-
-
-                      <p className="mt-1 text-zinc-200">
-
-                        {result.explorer
-
-                          ?.implementationAddress
-
-                          ? formatVerificationStatus(
-
-                              result.explorer
-
-                                .implementationVerificationStatus
-
-                            )
-
-                          : result.explorer
-
-                                ?.hasMultipleImplementations
-
-                            ? "Multiple implementations"
-
-                            : "N/A"}
-
-                      </p>
-
-                    </div>
-
-
-
-                    <div>
-
-                      <p className="text-zinc-500">
-
-                        ABI verification channels
-
-                      </p>
-
-
-
-                      <p className="mt-1 text-zinc-200">
-
-                        {result.explorer
-
-                          ?.abiSource ===
-
-                        "implementation"
-
-                          ? formatVerificationChannels(
-
-                              result.explorer
-
-                                .implementationIsVerifiedViaSourcify,
-
-                              result.explorer
-
-                                .implementationIsVerifiedViaEthBytecodeDb
-
-                            )
-
-                          : result.explorer
-
-                                ?.abiSource ===
-
-                              "contract"
-
-                            ? formatVerificationChannels(
-
-                                result.explorer
-
-                                  .isVerifiedViaSourcify,
-
-                                result.explorer
-
-                                  .isVerifiedViaEthBytecodeDb
-
-                              )
-
-                            : "Not reported"}
 
                       </p>
 
@@ -2316,9 +2413,9 @@ export default function Home() {
 
 
 
-                  {result.explorer
+                  {result.intelligence
 
-                    ?.hasMultipleImplementations && (
+                    .hasMultipleImplementations && (
 
                     <div className="mt-5 rounded-lg border border-sky-900/50 bg-sky-950/20 p-4">
 
@@ -2332,11 +2429,13 @@ export default function Home() {
 
                       <p className="mt-2 text-sm leading-6 text-sky-200/70">
 
-                        Arc Explorer reported{" "}
+                        Available provider metadata
+
+                        reported{" "}
 
                         {
 
-                          result.explorer
+                          result.intelligence
 
                             .implementationAddresses
 
@@ -2362,9 +2461,9 @@ export default function Home() {
 
 
 
-                  {result.explorer
+                  {result.intelligence
 
-                    ?.implementationAddress && (
+                    .implementationAddress && (
 
                     <div className="mt-5 rounded-lg border border-zinc-900 bg-black/30 p-4">
 
@@ -2380,7 +2479,7 @@ export default function Home() {
 
                         {
 
-                          result.explorer
+                          result.intelligence
 
                             .implementationAddress
 
@@ -2390,7 +2489,7 @@ export default function Home() {
 
 
 
-                      {result.explorer
+                      {result.intelligence
 
                         .implementationContractName && (
 
@@ -2398,7 +2497,7 @@ export default function Home() {
 
                           {
 
-                            result.explorer
+                            result.intelligence
 
                               .implementationContractName
 
@@ -2426,7 +2525,7 @@ export default function Home() {
 
                             {formatVerificationStatus(
 
-                              result.explorer
+                              result.intelligence
 
                                 .implementationVerificationStatus
 
@@ -2452,7 +2551,7 @@ export default function Home() {
 
                             {formatAbiEvidenceQuality(
 
-                              result.explorer
+                              result.intelligence
 
                                 .abiEvidenceQuality
 
@@ -2858,7 +2957,7 @@ export default function Home() {
 
                   Cerynq analyzes available
 
-                  Arc Mainnet and explorer
+                  Arc Mainnet and external verification
 
                   evidence to surface supported
 

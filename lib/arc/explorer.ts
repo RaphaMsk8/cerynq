@@ -1,21 +1,38 @@
-const BLOCKSCOUT_BASE_URL =
+import type {
+  ArcAbiEvidenceQuality,
+  ArcAbiItem,
+  ArcAbiSource,
+  ArcVerificationStatus,
+} from "@/lib/arc/evidence";
+
+import {
+  ArcProviderError,
+  type ArcProviderFailureReason,
+} from "@/lib/arc/provider";
+
+export type {
+  ArcAbiEvidenceQuality,
+  ArcAbiSource,
+  ArcVerificationStatus,
+} from "@/lib/arc/evidence";
+
+const DEFAULT_BLOCKSCOUT_BASE_URL =
   "https://api.blockscout.com/5042/api/v2";
 
 const BLOCKSCOUT_TIMEOUT_MS = 8_000;
 
-type AbiItem = {
-  type?: string;
-  name?: string;
-  stateMutability?: string;
-  inputs?: Array<{
-    name?: string;
-    type?: string;
-  }>;
-  outputs?: Array<{
-    name?: string;
-    type?: string;
-  }>;
-};
+function getBlockscoutBaseUrl(): string {
+  const configuredBaseUrl =
+    process.env.BLOCKSCOUT_BASE_URL?.trim();
+
+  return (
+    configuredBaseUrl ||
+    DEFAULT_BLOCKSCOUT_BASE_URL
+  ).replace(/\/+$/, "");
+}
+
+const blockscoutBaseUrl =
+  getBlockscoutBaseUrl();
 
 type AddressInfo = {
   is_contract?: boolean;
@@ -42,82 +59,98 @@ type SmartContractInfo = {
   abi?: unknown;
 };
 
-export type ArcVerificationStatus =
-  | "fully_verified"
-  | "partially_verified"
-  | "verified"
-  | "unverified"
-  | "unknown";
-
-export type ArcAbiEvidenceQuality =
-  | "full"
-  | "limited"
-  | "unknown";
-
-export type ArcAbiSource =
-  | "contract"
-  | "implementation"
-  | null;
-
 export type ArcExplorerMetadata = {
   isContract: boolean | null;
 
-  verificationStatus: ArcVerificationStatus;
+  verificationStatus:
+    ArcVerificationStatus;
 
-  isVerifiedViaSourcify: boolean | null;
-  isVerifiedViaEthBytecodeDb: boolean | null;
+  isVerifiedViaSourcify:
+    boolean | null;
+
+  isVerifiedViaEthBytecodeDb:
+    boolean | null;
 
   contractName: string | null;
 
   proxyType: string | null;
 
-  implementationAddress: string | null;
-  implementationAddresses: string[];
-  hasMultipleImplementations: boolean;
+  implementationAddress:
+    string | null;
 
-  implementationVerificationStatus: ArcVerificationStatus;
+  implementationAddresses:
+    string[];
 
-  implementationIsVerifiedViaSourcify: boolean | null;
-  implementationIsVerifiedViaEthBytecodeDb: boolean | null;
+  hasMultipleImplementations:
+    boolean;
 
-  implementationContractName: string | null;
+  implementationVerificationStatus:
+    ArcVerificationStatus;
 
-  abi: AbiItem[] | null;
-  abiSource: ArcAbiSource;
+  implementationIsVerifiedViaSourcify:
+    boolean | null;
 
-  abiVerificationStatus: ArcVerificationStatus;
-  abiEvidenceQuality: ArcAbiEvidenceQuality;
+  implementationIsVerifiedViaEthBytecodeDb:
+    boolean | null;
 
-  hasOwnerFunction: boolean | null;
+  implementationContractName:
+    string | null;
+
+  abi:
+    | ArcAbiItem[]
+    | null;
+
+  abiSource:
+    ArcAbiSource;
+
+  abiVerificationStatus:
+    ArcVerificationStatus;
+
+  abiEvidenceQuality:
+    ArcAbiEvidenceQuality;
+
+  hasOwnerFunction:
+    boolean | null;
 };
 
-class BlockscoutHttpError extends Error {
-  status: number;
-
-  constructor(
-    status: number,
-    endpoint: string
-  ) {
-    super(
-      `Blockscout request failed with status ${status} for ${endpoint}`
-    );
-
-    this.name = "BlockscoutHttpError";
-    this.status = status;
-  }
-}
-
-function getApiKey() {
+function getApiKey(): string {
   const apiKey =
-    process.env.BLOCKSCOUT_API_KEY;
+    process.env.BLOCKSCOUT_API_KEY?.trim();
 
   if (!apiKey) {
-    throw new Error(
+    throw new ArcProviderError(
+      "blockscout",
+      "configuration_error",
       "BLOCKSCOUT_API_KEY is not configured"
     );
   }
 
   return apiKey;
+}
+
+function getHttpFailureReason(
+  status: number
+): ArcProviderFailureReason {
+  if (
+    status === 401 ||
+    status === 403
+  ) {
+    return "unauthorized";
+  }
+
+  if (status === 408) {
+    return "timeout";
+  }
+
+  if (status === 429) {
+    return "rate_limited";
+  }
+
+  if (status >= 500) {
+    return "server_error";
+  }
+
+  return "http_error";
 }
 
 async function fetchBlockscoutJson<T>(
@@ -132,20 +165,26 @@ async function fetchBlockscoutJson<T>(
   }, BLOCKSCOUT_TIMEOUT_MS);
 
   try {
-    const separator = endpoint.includes("?")
-      ? "&"
-      : "?";
+    const separator =
+      endpoint.includes("?")
+        ? "&"
+        : "?";
 
     const response = await fetch(
-      `${BLOCKSCOUT_BASE_URL}${endpoint}${separator}apikey=${encodeURIComponent(
+      `${blockscoutBaseUrl}${endpoint}${separator}apikey=${encodeURIComponent(
         apiKey
       )}`,
       {
         headers: {
-          Accept: "application/json",
+          Accept:
+            "application/json",
         },
-        cache: "no-store",
-        signal: controller.signal,
+
+        cache:
+          "no-store",
+
+        signal:
+          controller.signal,
       }
     );
 
@@ -154,24 +193,65 @@ async function fetchBlockscoutJson<T>(
     }
 
     if (!response.ok) {
-      throw new BlockscoutHttpError(
-        response.status,
-        endpoint
+      const reason =
+        getHttpFailureReason(
+          response.status
+        );
+
+      throw new ArcProviderError(
+        "blockscout",
+        reason,
+        `Blockscout request failed with status ${response.status} for ${endpoint}`,
+        response.status
       );
     }
 
-    return (await response.json()) as T;
+    try {
+      return (
+        await response.json()
+      ) as T;
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        error.name === "AbortError"
+      ) {
+        throw new ArcProviderError(
+          "blockscout",
+          "timeout",
+          `Blockscout request timed out after ${BLOCKSCOUT_TIMEOUT_MS}ms`
+        );
+      }
+
+      throw new ArcProviderError(
+        "blockscout",
+        "invalid_response",
+        `Blockscout returned invalid JSON for ${endpoint}`
+      );
+    }
   } catch (error) {
+    if (
+      error instanceof
+      ArcProviderError
+    ) {
+      throw error;
+    }
+
     if (
       error instanceof Error &&
       error.name === "AbortError"
     ) {
-      throw new Error(
+      throw new ArcProviderError(
+        "blockscout",
+        "timeout",
         `Blockscout request timed out after ${BLOCKSCOUT_TIMEOUT_MS}ms`
       );
     }
 
-    throw error;
+    throw new ArcProviderError(
+      "blockscout",
+      "network_error",
+      `Blockscout network request failed for ${endpoint}`
+    );
   } finally {
     clearTimeout(timeout);
   }
@@ -207,18 +287,24 @@ function normalizeBoolean(
 
 function normalizeAbi(
   value: unknown
-): AbiItem[] | null {
+): ArcAbiItem[] | null {
   if (!Array.isArray(value)) {
     return null;
   }
 
-  const normalized = value.filter(
-    (item): item is AbiItem =>
-      typeof item === "object" &&
-      item !== null
-  );
+  const normalized =
+    value.filter(
+      (
+        item
+      ): item is ArcAbiItem =>
+        typeof item ===
+          "object" &&
+        item !== null
+    );
 
-  if (normalized.length === 0) {
+  if (
+    normalized.length === 0
+  ) {
     return null;
   }
 
@@ -226,11 +312,17 @@ function normalizeAbi(
 }
 
 function getVerificationStatus(
-  addressInfo: AddressInfo | null,
-  smartContractInfo: SmartContractInfo | null
+  addressInfo:
+    | AddressInfo
+    | null,
+
+  smartContractInfo:
+    | SmartContractInfo
+    | null
 ): ArcVerificationStatus {
   if (
-    smartContractInfo?.is_fully_verified ===
+    smartContractInfo
+      ?.is_fully_verified ===
     true
   ) {
     return "fully_verified";
@@ -238,22 +330,32 @@ function getVerificationStatus(
 
   if (
     smartContractInfo
-      ?.is_partially_verified === true
+      ?.is_partially_verified ===
+    true
   ) {
     return "partially_verified";
   }
 
   const explicitVerification =
-    typeof smartContractInfo?.is_verified ===
+    typeof smartContractInfo
+      ?.is_verified ===
     "boolean"
-      ? smartContractInfo.is_verified
-      : addressInfo?.is_verified;
+      ? smartContractInfo
+          .is_verified
+      : addressInfo
+          ?.is_verified;
 
-  if (explicitVerification === false) {
+  if (
+    explicitVerification ===
+    false
+  ) {
     return "unverified";
   }
 
-  if (explicitVerification === true) {
+  if (
+    explicitVerification ===
+    true
+  ) {
     return "verified";
   }
 
@@ -261,8 +363,12 @@ function getVerificationStatus(
 }
 
 function getAbiEvidenceQuality(
-  abi: AbiItem[] | null,
-  verificationStatus: ArcVerificationStatus
+  abi:
+    | ArcAbiItem[]
+    | null,
+
+  verificationStatus:
+    ArcVerificationStatus
 ): ArcAbiEvidenceQuality {
   if (abi === null) {
     return "unknown";
@@ -279,43 +385,67 @@ function getAbiEvidenceQuality(
 }
 
 function getImplementationAddresses(
-  smartContractInfo: SmartContractInfo | null
+  smartContractInfo:
+    | SmartContractInfo
+    | null
 ): string[] {
   const addresses =
-    smartContractInfo?.implementations
+    smartContractInfo
+      ?.implementations
       ?.map(
-        (implementation) =>
-          implementation.address_hash
+        (
+          implementation
+        ) =>
+          implementation
+            .address_hash
       )
       .filter(
-        (address): address is string =>
-          typeof address === "string" &&
+        (
+          address
+        ): address is string =>
+          typeof address ===
+            "string" &&
           address.length > 0
       ) ?? [];
 
-  return [...new Set(addresses)];
+  return [
+    ...new Set(addresses),
+  ];
 }
 
 function detectOwnerFunction(
-  abi: AbiItem[] | null,
-  abiEvidenceQuality: ArcAbiEvidenceQuality
+  abi:
+    | ArcAbiItem[]
+    | null,
+
+  abiEvidenceQuality:
+    ArcAbiEvidenceQuality
 ): boolean | null {
   if (abi === null) {
     return null;
   }
 
-  const ownerFound = abi.some(
-    (item) =>
-      item.type === "function" &&
-      item.name === "owner" &&
-      (item.inputs?.length ?? 0) === 0
-  );
+  const ownerFound =
+    abi.some(
+      (item) =>
+        item.type ===
+          "function" &&
+        item.name ===
+          "owner" &&
+        (
+          item.inputs?.length ??
+          0
+        ) === 0
+    );
 
   if (ownerFound) {
     return true;
   }
 
-  if (abiEvidenceQuality === "full") {
+  if (
+    abiEvidenceQuality ===
+    "full"
+  ) {
     return false;
   }
 
@@ -324,8 +454,11 @@ function detectOwnerFunction(
 
 export async function getArcExplorerMetadata(
   address: string
-): Promise<ArcExplorerMetadata> {
-  const apiKey = getApiKey();
+): Promise<
+  ArcExplorerMetadata | null
+> {
+  const apiKey =
+    getApiKey();
 
   const [
     addressInfo,
@@ -335,16 +468,17 @@ export async function getArcExplorerMetadata(
       address,
       apiKey
     ),
+
     fetchSmartContractInfo(
       address,
       apiKey
     ),
   ]);
 
-  if (addressInfo === null) {
-    throw new Error(
-      "Address was not found by Arc Explorer"
-    );
+  if (
+    addressInfo === null
+  ) {
+    return null;
   }
 
   const verificationStatus =
@@ -353,12 +487,15 @@ export async function getArcExplorerMetadata(
       smartContractInfo
     );
 
-  const contractAbi = normalizeAbi(
-    smartContractInfo?.abi
-  );
+  const contractAbi =
+    normalizeAbi(
+      smartContractInfo?.abi
+    );
 
   const proxyType =
-    smartContractInfo?.proxy_type ?? null;
+    smartContractInfo
+      ?.proxy_type ??
+    null;
 
   const implementationAddresses =
     getImplementationAddresses(
@@ -366,10 +503,12 @@ export async function getArcExplorerMetadata(
     );
 
   const hasMultipleImplementations =
-    implementationAddresses.length > 1;
+    implementationAddresses
+      .length > 1;
 
   const implementationAddress =
-    implementationAddresses.length === 1
+    implementationAddresses
+      .length === 1
       ? implementationAddresses[0]
       : null;
 
@@ -381,7 +520,9 @@ export async function getArcExplorerMetadata(
     | SmartContractInfo
     | null = null;
 
-  if (implementationAddress) {
+  if (
+    implementationAddress
+  ) {
     [
       implementationAddressInfo,
       implementationSmartContractInfo,
@@ -390,6 +531,7 @@ export async function getArcExplorerMetadata(
         implementationAddress,
         apiKey
       ),
+
       fetchSmartContractInfo(
         implementationAddress,
         apiKey
@@ -403,9 +545,11 @@ export async function getArcExplorerMetadata(
       implementationSmartContractInfo
     );
 
-  const implementationAbi = normalizeAbi(
-    implementationSmartContractInfo?.abi
-  );
+  const implementationAbi =
+    normalizeAbi(
+      implementationSmartContractInfo
+        ?.abi
+    );
 
   const effectiveAbi =
     hasMultipleImplementations
@@ -413,19 +557,24 @@ export async function getArcExplorerMetadata(
       : implementationAbi ??
         contractAbi;
 
-  const abiSource: ArcAbiSource =
+  const abiSource:
+    ArcAbiSource =
     hasMultipleImplementations
       ? null
-      : implementationAbi !== null
+      : implementationAbi !==
+          null
         ? "implementation"
-        : contractAbi !== null
+        : contractAbi !==
+            null
           ? "contract"
           : null;
 
   const abiVerificationStatus =
-    abiSource === "implementation"
+    abiSource ===
+    "implementation"
       ? implementationVerificationStatus
-      : abiSource === "contract"
+      : abiSource ===
+          "contract"
         ? verificationStatus
         : "unknown";
 
@@ -444,7 +593,8 @@ export async function getArcExplorerMetadata(
   return {
     isContract:
       normalizeBoolean(
-        addressInfo.is_contract
+        addressInfo
+          .is_contract
       ),
 
     verificationStatus,
@@ -462,7 +612,8 @@ export async function getArcExplorerMetadata(
       ),
 
     contractName:
-      smartContractInfo?.name ??
+      smartContractInfo
+        ?.name ??
       addressInfo.name ??
       null,
 
@@ -489,11 +640,14 @@ export async function getArcExplorerMetadata(
       ),
 
     implementationContractName:
-      implementationSmartContractInfo?.name ??
-      implementationAddressInfo?.name ??
+      implementationSmartContractInfo
+        ?.name ??
+      implementationAddressInfo
+        ?.name ??
       null,
 
-    abi: effectiveAbi,
+    abi:
+      effectiveAbi,
 
     abiSource,
 
