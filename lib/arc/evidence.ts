@@ -1,4 +1,4 @@
-export type ArcEvidenceProvider =
+﻿export type ArcEvidenceProvider =
   | "blockscout"
   | "sourcify"
   | null;
@@ -35,9 +35,9 @@ export type ArcAbiItem = {
 };
 
 export type ArcAbiEvidenceSource =
-  | "Arc Explorer Contract ABI"
-  | "Arc Explorer Implementation ABI"
-  | "Arc Explorer ABI"
+  | "Blockscout Contract ABI"
+  | "Blockscout Implementation ABI"
+  | "Blockscout ABI"
   | "Sourcify Contract ABI"
   | "Sourcify Implementation ABI"
   | "Sourcify ABI"
@@ -63,14 +63,14 @@ export function getAbiEvidenceSource(
 ): ArcAbiEvidenceSource {
   if (provider === "blockscout") {
     if (source === "implementation") {
-      return "Arc Explorer Implementation ABI";
+      return "Blockscout Implementation ABI";
     }
 
     if (source === "contract") {
-      return "Arc Explorer Contract ABI";
+      return "Blockscout Contract ABI";
     }
 
-    return "Arc Explorer ABI";
+    return "Blockscout ABI";
   }
 
   if (provider === "sourcify") {

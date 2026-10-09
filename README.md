@@ -4,7 +4,7 @@
 
 Cerynq is an onchain risk intelligence platform being built on Arc.
 
-The current beta starts with smart-contract intelligence: identifying supported privileged-control signals, resolving proxy implementations when possible, evaluating evidence provenance, and explaining the evidence and limitations behind each finding.
+The current beta begins with smart-contract intelligence: identifying supported privileged-control signals, resolving supported proxy implementations, evaluating evidence provenance, and explaining the evidence and limitations behind each finding.
 
 Cerynq is designed as a broader risk-intelligence platform. Its architecture is intended to expand beyond contract analysis into wallet intelligence, entity intelligence, risk-flow monitoring, and future institutional risk workflows.
 
@@ -29,17 +29,20 @@ Instead, Cerynq surfaces supported risk signals together with:
 Current capabilities include:
 
 - Arc Mainnet smart-contract analysis
-- Onchain bytecode detection
-- Proxy-aware analysis
-- Implementation resolution when available
+- onchain bytecode detection
+- canonical EIP-1167 minimal-proxy resolution from runtime bytecode
+- Blockscout metadata and ABI intelligence
+- Sourcify ABI fallback
+- implementation-aware ABI analysis
 - ABI provenance tracking
-- Verification-quality tracking
-- Explainable privileged-control findings
-- Explicit `Unknown` states when evidence is insufficient
+- verification-quality tracking
+- explainable privileged-control findings
+- explicit `Unknown` states when evidence is insufficient
 - Risk Model v0.1
-- Evidence confidence
-- Model coverage
-- Conservative treatment of incomplete or limited evidence
+- evidence confidence
+- model coverage
+- conservative treatment of incomplete or limited evidence
+- operational-state reporting for provider and RPC degradation
 
 ---
 
@@ -72,8 +75,10 @@ Cerynq tracks not only what was observed, but also where the evidence came from 
 Current evidence sources include:
 
 - Arc Mainnet RPC
-- Arc Explorer contract ABI
-- Arc Explorer implementation ABI
+- Blockscout contract ABI
+- Blockscout implementation ABI
+- Sourcify contract ABI
+- Sourcify implementation ABI
 
 ABI evidence can currently be classified as:
 
@@ -89,7 +94,7 @@ Verification provenance can include:
 - unverified
 - unknown
 - Sourcify verification signals
-- bytecode-database verification signals
+- bytecode-database verification signals reported by Blockscout
 
 A limited-provenance ABI can still support a positive interface signal.
 
@@ -97,9 +102,85 @@ However, absence of a supported method from limited evidence is not treated as p
 
 ---
 
+## Evidence Resolution and Fallback
+
+Cerynq does not rely on a single metadata provider.
+
+The current evidence-resolution path is:
+
+```text
+Arc Mainnet RPC
+      |
+      |-- runtime bytecode
+      |      |
+      |      `-- canonical EIP-1167 resolution when applicable
+      |
+      v
+Blockscout
+      |
+      |-- usable ABI evidence -> use Blockscout evidence
+      |
+      `-- unavailable / not found / unusable ABI
+                    |
+                    v
+                 Sourcify
+                    |
+                    `-- use fallback ABI evidence when available
+```
+
+Blockscout is the primary metadata and ABI provider.
+
+Sourcify is used as a fallback when Blockscout is unavailable, does not return a usable result, or does not provide usable ABI evidence for the analyzed contract or resolved implementation.
+
+Provider failures are kept distinct from evidence absence. A provider outage does not become a `not_detected` risk result.
+
+---
+
+## Operational States
+
+A successful or attempted scan can expose one of four operational states.
+
+### Normal
+
+Primary evidence resolution is functioning normally.
+
+Typical case:
+
+- Arc Mainnet RPC is available
+- Blockscout is available
+- Blockscout provides the ABI evidence used by the scan
+
+### Degraded
+
+The primary evidence source is unavailable or insufficient, but fallback evidence allows the scan to continue.
+
+Typical case:
+
+- Arc Mainnet RPC is available
+- Blockscout fails or does not provide usable ABI evidence
+- Sourcify provides usable fallback ABI evidence
+
+### Limited
+
+Arc Mainnet remains reachable, but external ABI evidence is unavailable or insufficient.
+
+In this state:
+
+- direct onchain observations can still be used where supported
+- ABI-dependent checks can remain `Unknown`
+- infrastructure failure is not interpreted as absence of a capability
+
+### Unavailable
+
+Arc Mainnet RPC cannot be queried reliably enough to complete the scan.
+
+Cerynq does not fabricate a partial result in this state.
+
+---
+
 ## Assessment Semantics
 
-A Cerynq scan can produce one of three assessment states.
+A Cerynq risk assessment can produce one of three assessment states.
 
 ### Complete
 
@@ -121,40 +202,91 @@ The available evidence was not sufficient to resolve the current model.
 
 No risk level is assigned.
 
+Operational state and assessment state describe different things:
+
+- **operational state** describes whether the data path is healthy, degraded, limited, or unavailable
+- **assessment state** describes how completely the current risk model could classify its checks
+
 ---
 
 ## Proxy Analysis
 
-Cerynq uses Arc Explorer metadata to identify and resolve supported proxy structures.
+Cerynq currently performs independent onchain resolution for **canonical EIP-1167 minimal proxies**.
 
-When a proxy has one reported implementation, Cerynq can analyze the implementation ABI when evidence is available.
+When runtime bytecode matches the canonical 45-byte EIP-1167 pattern, Cerynq extracts the implementation address directly from bytecode and can evaluate implementation-level ABI evidence when available.
 
-For multi-implementation architectures, Cerynq currently avoids collapsing multiple implementations into a single ABI.
+Blockscout proxy metadata can still contribute provider metadata, but independently resolved onchain EIP-1167 evidence takes precedence for implementation identity.
 
-This is intentional.
+For multi-implementation architectures, Cerynq currently avoids collapsing multiple reported implementations into a single ABI.
+
+The current beta does **not** claim general support for:
+
+- EIP-1967 proxy resolution
+- Diamond / EIP-2535 proxy resolution
+- arbitrary custom proxy architectures
 
 When the evidence cannot justify a complete conclusion, Cerynq prefers unresolved findings over false certainty.
 
-The current beta has been validated against an **EIP-1167 minimal proxy on Arc Mainnet**.
+---
+
+## Resilience and Provider Protection
+
+The current beta includes several safeguards intended to reduce avoidable provider load and preserve scan behavior during partial outages.
+
+### Short-lived provider cache
+
+Successful Blockscout and Sourcify metadata results are cached in memory for a short TTL.
+
+Current configuration:
+
+```text
+TTL: 60 seconds
+Maximum entries: 200 per provider cache
+```
+
+### In-flight deduplication
+
+Concurrent scans for the same address share the same in-progress provider request instead of issuing duplicate external requests.
+
+### Blockscout request pacing
+
+The Blockscout Free tier currently enforces a request-rate limit.
+
+Cerynq spaces Blockscout request starts by 250 ms, limiting a single running process to at most approximately 4 Blockscout requests per second.
+
+This intentionally leaves a small margin below the provider limit.
+
+### Important deployment boundary
+
+The cache, in-flight deduplication, route rate limiter, and Blockscout pacing are in-memory safeguards.
+
+They are useful for the beta but are **not distributed, cross-instance production rate limiting**.
+
+Production deployment should also use platform-level protection such as Vercel firewall / WAF / rate-limiting controls where appropriate.
 
 ---
 
 ## Architecture
 
-The current codebase separates evidence collection, detection, and risk evaluation.
+The current codebase separates chain access, provider resolution, evidence modeling, detection, and risk evaluation.
 
 ```text
 app/
   api/
     scan/
       route.ts
-
   page.tsx
 
 lib/
   arc/
+    cache.ts
     client.ts
+    evidence.ts
     explorer.ts
+    provider.ts
+    proxy.ts
+    resolver.ts
+    sourcify.ts
 
   detectors/
     ownership.ts
@@ -166,6 +298,19 @@ lib/
   risk/
     engine.ts
 ```
+
+Key responsibilities:
+
+- `client.ts` — Arc Mainnet RPC client
+- `explorer.ts` — Blockscout adapter and provider request pacing
+- `sourcify.ts` — Sourcify adapter
+- `provider.ts` — provider error and operational-status modeling
+- `proxy.ts` — canonical EIP-1167 runtime-bytecode resolution
+- `resolver.ts` — provider selection, fallback, cache usage, and effective ABI evidence
+- `evidence.ts` — provider-neutral evidence types and provenance labels
+- `cache.ts` — short-lived async cache and in-flight deduplication
+- `detectors/*` — privileged-control detectors
+- `risk/engine.ts` — Risk Model v0.1 evaluation
 
 This separation is intentional.
 
@@ -181,7 +326,7 @@ Future areas of research and development include the following.
 
 ### Bytecode Signal Intelligence
 
-Cerynq is intended to analyze onchain bytecode when verified ABI evidence is unavailable or incomplete.
+Cerynq may analyze additional onchain bytecode signals when verified ABI evidence is unavailable or incomplete.
 
 A core principle of this future capability is the distinction between:
 
@@ -198,7 +343,7 @@ It does **not** by itself prove:
 - administrative authority
 - malicious intent
 
-Cerynq should preserve this distinction when bytecode intelligence is introduced.
+Cerynq should preserve this distinction if broader bytecode intelligence is introduced.
 
 ### Broader Contract Intelligence
 
@@ -308,14 +453,61 @@ Current stack:
 - viem
 - Zod
 - Arc Mainnet
-- Arc Explorer / Blockscout API
+- Blockscout API
+- Sourcify API
 
 Arc Mainnet:
 
 ```text
 Chain ID: 5042
-RPC: https://rpc.mainnet.arc.io
+Default RPC: https://rpc.mainnet.arc.io
 ```
+
+---
+
+## Environment Variables
+
+Copy `.env.example` to `.env.local` and configure the required secret.
+
+```env
+BLOCKSCOUT_API_KEY=
+
+ARC_MAINNET_RPC_URL=https://rpc.mainnet.arc.io
+BLOCKSCOUT_BASE_URL=https://api.blockscout.com/5042/api/v2
+SOURCIFY_BASE_URL=https://sourcify.dev/server/v2
+```
+
+### `BLOCKSCOUT_API_KEY`
+
+Required.
+
+Used server-side for Blockscout metadata and ABI requests.
+
+Never expose this value through a `NEXT_PUBLIC_*` variable.
+
+### `ARC_MAINNET_RPC_URL`
+
+Optional.
+
+Defaults to the official public Arc Mainnet RPC.
+
+### `BLOCKSCOUT_BASE_URL`
+
+Optional.
+
+Defaults to the Arc Mainnet Blockscout API base URL.
+
+This is also useful for controlled provider-failure testing in local development.
+
+### `SOURCIFY_BASE_URL`
+
+Optional.
+
+Defaults to the public Sourcify v2 API base URL.
+
+This is also useful for controlled fallback and failure testing in local development.
+
+Do not commit `.env.local` or production credentials.
 
 ---
 
@@ -327,19 +519,17 @@ Install dependencies:
 npm install
 ```
 
-Create a local environment file:
+Create the local environment file:
 
 ```text
 .env.local
 ```
 
-Configure the Blockscout API key:
+At minimum:
 
 ```env
 BLOCKSCOUT_API_KEY=your_blockscout_api_key
 ```
-
-Do not commit `.env.local` or production credentials.
 
 Start the development server:
 
@@ -371,31 +561,58 @@ Example request:
 }
 ```
 
-The endpoint returns contract intelligence, evidence metadata, detector findings, and the current risk-model result.
+A successful scan can return:
+
+- Arc network metadata
+- contract / EOA classification
+- operational status
+- provider operational states
+- proxy and implementation intelligence
+- effective ABI provider and source
+- ABI evidence quality
+- detector findings
+- current risk-model assessment
 
 The current beta performs read-only analysis.
 
 Cerynq does not execute onchain transactions through the scan endpoint.
 
+If Arc Mainnet RPC is unavailable, the endpoint can return HTTP `503` with:
+
+```json
+{
+  "ok": false,
+  "network": "Arc Mainnet",
+  "chainId": 5042,
+  "address": "0x...",
+  "operationalStatus": "unavailable",
+  "error": "Arc Mainnet is temporarily unavailable. Cerynq could not complete this scan."
+}
+```
+
 ---
 
 ## Security Boundaries
 
-The current beta performs read-only analysis against public blockchain and explorer data.
+The current beta performs read-only analysis against public blockchain and verification-provider data.
 
 Current safeguards include:
 
 - strict request validation
 - JSON content-type enforcement
 - request-body size limits
-- basic rate limiting
+- basic per-process request rate limiting
+- Blockscout request pacing
+- short-lived provider caching
+- in-flight request deduplication
+- typed provider failure handling
 - generic client-facing error responses
 - server-side secret handling
-- security response headers
+- explicit operational-state reporting
 
-The current in-memory rate limiter is a basic beta safeguard.
+The current in-memory safeguards should not be considered distributed production-grade traffic control.
 
-It should not be considered a distributed production-grade rate-limiting system.
+Deployment-level protection remains part of the production launch configuration.
 
 ---
 
@@ -413,11 +630,27 @@ Lint:
 npm run lint
 ```
 
+Whitespace validation:
+
+```bash
+git diff --check
+```
+
 Production dependency audit:
 
 ```bash
 npm audit --omit=dev
 ```
+
+Before release, Cerynq should also be smoke-tested across:
+
+- normal provider operation
+- Blockscout failure with Sourcify fallback
+- both ABI providers unavailable
+- Arc Mainnet RPC unavailable
+- repeated same-address scans
+- concurrent same-address scans
+- multiple contract types and evidence-quality cases
 
 ---
 
@@ -432,12 +665,16 @@ It may not identify:
 - unsupported naming conventions
 - hidden runtime behavior
 - custom administrative architectures
-- every proxy architecture
+- proxy architectures outside the currently supported scope
 - every role-based access mechanism
 - every upgrade mechanism
 - every malicious behavior
 - every unsafe contract design
 - every economic or governance risk
+
+Canonical EIP-1167 minimal-proxy resolution is currently supported.
+
+General EIP-1967, Diamond / EIP-2535, and arbitrary custom proxy resolution are not currently claimed.
 
 Model coverage refers only to checks implemented in the current Cerynq risk model.
 
@@ -449,6 +686,7 @@ Results should always be interpreted together with:
 - evidence confidence
 - model coverage
 - assessment status
+- operational status
 - known limitations
 
 Cerynq results are informational and do not constitute financial, investment, legal, or complete security-audit advice.
@@ -462,11 +700,13 @@ Cerynq results are informational and do not constitute financial, investment, le
 Current focus:
 
 - Arc Mainnet
-- Contract intelligence
-- Explainable findings
-- Evidence provenance
-- Proxy-aware analysis
+- contract intelligence
+- explainable findings
+- evidence provenance
+- resilient provider resolution
+- canonical EIP-1167 proxy resolution
 - Risk Model v0.1
+- beta deployment and validation
 
 Future platform direction includes:
 

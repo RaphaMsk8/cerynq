@@ -34,6 +34,12 @@ type OperationalStatus =
   | "limited"
   | "unavailable";
 
+type ResolutionSource =
+  | "onchain_bytecode"
+  | "blockscout"
+  | "sourcify"
+  | null;
+
 const rateLimitStore = new Map<
   string,
   RateLimitRecord
@@ -619,12 +625,33 @@ export async function POST(
         ?.proxyType ??
       null;
 
+    const proxyResolutionSource:
+      ResolutionSource =
+      onchainProxy
+        ? "onchain_bytecode"
+        : blockscoutMetadata
+            ?.proxyType
+          ? "blockscout"
+          : sourcifyMetadata
+              ?.proxyType
+            ? "sourcify"
+            : null;
+
     const implementationAddress =
       onchainProxy
         ?.implementationAddress ??
       blockscoutMetadata
         ?.implementationAddress ??
       null;
+
+    const implementationResolutionSource:
+      ResolutionSource =
+      onchainProxy
+        ? "onchain_bytecode"
+        : blockscoutMetadata
+            ?.implementationAddress
+          ? "blockscout"
+          : null;
 
     const implementationAddresses =
       onchainProxy
@@ -728,7 +755,11 @@ export async function POST(
 
           proxyType,
 
+          proxyResolutionSource,
+
           implementationAddress,
+
+          implementationResolutionSource,
         }
       );
     }
@@ -865,7 +896,11 @@ export async function POST(
       intelligence: {
         proxyType,
 
+        proxyResolutionSource,
+
         implementationAddress,
+
+        implementationResolutionSource,
 
         implementationAddresses,
 

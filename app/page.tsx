@@ -209,9 +209,17 @@ type AbiSource =
   | "implementation"
   | null;
 
+type ResolutionSource =
+  | "onchain_bytecode"
+  | "blockscout"
+  | "sourcify"
+  | null;
+
 type IntelligenceResult = {
   proxyType: string | null;
+  proxyResolutionSource: ResolutionSource;
   implementationAddress: string | null;
+  implementationResolutionSource: ResolutionSource;
   implementationAddresses: string[];
   hasMultipleImplementations: boolean;
   contractName: string | null;
@@ -864,11 +872,12 @@ function formatProxyType(
 
 
 
-  if (
+  const normalizedProxyType =
+    proxyType.toLowerCase();
 
-    proxyType.toLowerCase() === "eip1167"
 
-  ) {
+
+  if (normalizedProxyType === "eip1167") {
 
     return "EIP-1167";
 
@@ -876,7 +885,51 @@ function formatProxyType(
 
 
 
+  if (normalizedProxyType === "eip1967") {
+
+    return "EIP-1967";
+
+  }
+
+
+
   return proxyType;
+
+}
+
+
+
+function formatResolutionSource(
+
+  source?: ResolutionSource
+
+) {
+
+  if (source === "onchain_bytecode") {
+
+    return "Resolved from onchain bytecode";
+
+  }
+
+
+
+  if (source === "blockscout") {
+
+    return "Reported by Blockscout";
+
+  }
+
+
+
+  if (source === "sourcify") {
+
+    return "Reported by Sourcify";
+
+  }
+
+
+
+  return "Unavailable";
 
 }
 
@@ -2319,6 +2372,26 @@ export default function Home() {
 
                       </p>
 
+
+
+                      {result.intelligence
+
+                        .proxyResolutionSource && (
+
+                        <p className="mt-1 text-xs text-zinc-600">
+
+                          {formatResolutionSource(
+
+                            result.intelligence
+
+                              .proxyResolutionSource
+
+                          )}
+
+                        </p>
+
+                      )}
+
                     </div>
 
 
@@ -2486,6 +2559,28 @@ export default function Home() {
                         }
 
                       </p>
+
+
+
+                      {result.intelligence
+
+                        .implementationResolutionSource && (
+
+                        <p className="mt-1 text-xs text-zinc-600">
+
+                          Source:{" "}
+
+                          {formatResolutionSource(
+
+                            result.intelligence
+
+                              .implementationResolutionSource
+
+                          )}
+
+                        </p>
+
+                      )}
 
 
 

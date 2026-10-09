@@ -21,6 +21,27 @@ const DEFAULT_BLOCKSCOUT_BASE_URL =
 
 const BLOCKSCOUT_TIMEOUT_MS = 8_000;
 
+/*
+ * Blockscout Free tier currently allows 5 requests/second.
+ *
+ * Cerynq spaces request starts by 250ms, limiting this process
+ * to at most 4 Blockscout requests/second and leaving a small
+ * safety margin below the provider limit.
+ *
+ * This limiter is intentionally provider-local and in-memory.
+ * It protects a single server process. Production edge/WAF
+ * controls remain a separate deployment concern.
+ */
+const BLOCKSCOUT_MIN_REQUEST_INTERVAL_MS =
+  250;
+
+let blockscoutRequestQueue:
+  Promise<void> =
+    Promise.resolve();
+
+let nextBlockscoutRequestAt =
+  0;
+
 function getBlockscoutBaseUrl(): string {
   const configuredBaseUrl =
     process.env.BLOCKSCOUT_BASE_URL?.trim();
@@ -153,10 +174,64 @@ function getHttpFailureReason(
   return "http_error";
 }
 
+function sleep(
+  delayMs: number
+): Promise<void> {
+  return new Promise(
+    (resolve) => {
+      setTimeout(
+        resolve,
+        delayMs
+      );
+    }
+  );
+}
+
+async function waitForBlockscoutRequestSlot():
+  Promise<void> {
+  const scheduledRequest =
+    blockscoutRequestQueue.then(
+      async () => {
+        const now =
+          Date.now();
+
+        const waitMs =
+          Math.max(
+            0,
+            nextBlockscoutRequestAt -
+              now
+          );
+
+        if (waitMs > 0) {
+          await sleep(
+            waitMs
+          );
+        }
+
+        nextBlockscoutRequestAt =
+          Date.now() +
+          BLOCKSCOUT_MIN_REQUEST_INTERVAL_MS;
+      }
+    );
+
+  blockscoutRequestQueue =
+    scheduledRequest.catch(
+      () => undefined
+    );
+
+  await scheduledRequest;
+}
+
 async function fetchBlockscoutJson<T>(
   endpoint: string,
   apiKey: string
 ): Promise<T | null> {
+  /*
+   * Acquire a provider request slot before starting the timeout.
+   * Queue time therefore does not consume the HTTP timeout budget.
+   */
+  await waitForBlockscoutRequestSlot();
+
   const controller =
     new AbortController();
 
