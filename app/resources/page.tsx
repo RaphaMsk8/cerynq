@@ -121,6 +121,21 @@ const evidence = [
   },
 ];
 
+const modelTopics = [
+  {
+    id: "risk-model",
+    title: "Reading the Risk Assessment",
+    meaning:
+      "Risk Model v0.1 summarizes a limited set of privileged-control signals. Its numeric score is normalized to a 0–100 scale and is not an overall security rating.",
+    importance:
+      "A visible score is only meaningful alongside the assessment status, evidence confidence, and coverage of supported checks.",
+    check:
+      "Review detected findings individually, examine any Unknown results, and inspect evidence before making a decision. Partial assessments reflect only resolved checks.",
+    limitation:
+      "A low score is not proof of safety, and an elevated score does not establish fraud. The model does not replace an audit or cover every onchain risk.",
+  },
+];
+
 type Topic = (typeof controls)[number];
 
 function TopicCard({ topic }: { topic: Topic }) {
@@ -214,7 +229,7 @@ export default function ResourcesPage() {
           aria-label="Resource topics"
           className="mb-12 flex flex-wrap gap-2"
         >
-          {[...controls, ...evidence].map((topic) => (
+          {[...modelTopics, ...controls, ...evidence].map((topic) => (
             <a
               key={topic.id}
               href={`#${topic.id}`}
@@ -225,7 +240,17 @@ export default function ResourcesPage() {
           ))}
         </nav>
 
-        <section className="space-y-5">
+        <section className="mb-14 space-y-5">
+          <h2 className="pb-2 text-2xl font-semibold">
+            Understanding your assessment
+          </h2>
+
+          {modelTopics.map((topic) => (
+            <TopicCard key={topic.id} topic={topic} />
+          ))}
+        </section>
+
+        <section className="space-y-5" id="controls">
           <h2 className="pb-2 text-2xl font-semibold">
             Security Controls
           </h2>
