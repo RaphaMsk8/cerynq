@@ -1,0 +1,133 @@
+
+/*
+  CERYNQ — OFFICIAL BRAND PRESENTATION
+
+  Imagens aprovadas:
+  - cerynq-shield-hd.webp
+  - cerynq-wordmark-hd.webp
+
+  Sem recortes CSS, mascaras ou filtros de nitidez.
+  Nao altera nenhum outro componente da plataforma.
+*/
+
+.cq-brand-hd {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+
+  width: 100%;
+  min-width: 0;
+  min-height: 72px;
+  flex-shrink: 0;
+
+  padding: 2px 1px 12px;
+  margin: 0;
+
+  border-bottom: 1px solid rgba(70, 111, 168, 0.38);
+  background: transparent;
+  text-decoration: none;
+}
+
+.cq-brand-hd-shield {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  width: 54px;
+  height: 62px;
+  flex: 0 0 54px;
+
+  overflow: visible;
+  background: transparent;
+}
+
+.cq-brand-hd-shield img {
+  display: block;
+
+  width: auto;
+  height: 60px;
+  max-width: 100%;
+
+  object-fit: contain;
+
+  border: none;
+  border-radius: 0;
+  background: transparent;
+
+  filter: none;
+  opacity: 1;
+  mix-blend-mode: normal;
+
+  -webkit-mask-image: none;
+  mask-image: none;
+  clip-path: none;
+}
+
+.cq-brand-hd-wordmark {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+
+  min-width: 0;
+  flex: 1 1 auto;
+
+  background: transparent;
+  overflow: visible;
+}
+
+.cq-brand-hd-wordmark img {
+  display: block;
+
+  width: 100%;
+  height: auto;
+  max-height: 45px;
+
+  object-fit: contain;
+  object-position: left center;
+
+  background: transparent;
+  border: none;
+
+  filter: none;
+  opacity: 1;
+  mix-blend-mode: normal;
+
+  -webkit-mask-image: none;
+  mask-image: none;
+  clip-path: none;
+}
+
+/* A luz pertence as imagens, nao a efeitos
+   artificiais adicionados por CSS. */
+
+.cq-brand-hd:hover {
+  text-decoration: none;
+}
+
+.cq-brand-hd:focus-visible {
+  outline: 2px solid #60d5ef;
+  outline-offset: 3px;
+  border-radius: 4px;
+}
+
+/* MOBILE */
+
+.cq-mobile-header .cq-brand-hd {
+  width: min(232px, 100%);
+  min-height: 65px;
+  padding-bottom: 8px;
+}
+
+.cq-mobile-header .cq-brand-hd-shield {
+  width: 50px;
+  height: 57px;
+  flex-basis: 50px;
+}
+
+.cq-mobile-header .cq-brand-hd-shield img {
+  height: 55px;
+}
+
+.cq-mobile-header .cq-brand-hd-wordmark img {
+  max-height: 40px;
+}

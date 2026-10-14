@@ -1,0 +1,580 @@
+
+/*
+  CERYNQ — FINAL VISUAL POLISH
+
+  Mantém os fundos aprovados.
+  Ajusta branding, contraste e legibilidade.
+  Nenhuma alteração na API ou no Risk Model.
+*/
+
+/* CENÁRIO PRINCIPAL FIXO */
+
+main:has(.cq-sidebar) {
+  position: relative;
+  isolation: isolate;
+  min-height: 100vh;
+  background: #030817 !important;
+  color: #f4f8ff;
+}
+
+main:has(.cq-sidebar)::before {
+  content: "";
+  position: fixed;
+  z-index: 0;
+  inset: 0 0 0 232px;
+  pointer-events: none;
+
+  background-color: #030817;
+
+  background-image:
+    linear-gradient(
+      90deg,
+      rgba(3, 8, 23, .97) 0%,
+      rgba(3, 8, 23, .84) 28%,
+      rgba(3, 8, 23, .66) 55%,
+      rgba(3, 8, 23, .43) 100%
+    ),
+    linear-gradient(
+      180deg,
+      rgba(3, 8, 23, .14),
+      rgba(3, 8, 23, .18) 48%,
+      rgba(3, 8, 23, .34)
+    ),
+    url("/cerynq-main-bg.webp");
+
+  background-position:
+    center,
+    center,
+    right center;
+
+  background-size:
+    100% 100%,
+    100% 100%,
+    cover;
+
+  background-repeat: no-repeat;
+}
+
+main:has(.cq-sidebar) > div {
+  position: relative;
+  z-index: 1;
+}
+
+main:has(.cq-sidebar) .cq-home-main,
+main:has(.cq-sidebar) > div > div.min-w-0 {
+  background: transparent !important;
+}
+
+/* SIDEBAR */
+
+.cq-sidebar {
+  position: sticky;
+  isolation: isolate;
+  background: #061128 !important;
+  border-right: 1px solid #29486d !important;
+}
+
+.cq-sidebar::before {
+  content: "";
+  position: absolute;
+  z-index: 0;
+  inset: 57% 0 0;
+  pointer-events: none;
+
+  background-image:
+    linear-gradient(
+      to bottom,
+      #061128 0%,
+      rgba(6, 17, 40, .82) 22%,
+      rgba(6, 17, 40, .34) 62%,
+      rgba(6, 17, 40, .28) 100%
+    ),
+    url("/cerynq-sidebar-bg.webp");
+
+  background-size:
+    100% 100%,
+    cover;
+
+  background-position:
+    center,
+    65% bottom;
+
+  background-repeat: no-repeat;
+  opacity: .76;
+}
+
+.cq-sidebar > * {
+  position: relative;
+  z-index: 1;
+}
+
+.cq-sidebar .cq-menu-link.cq-active {
+  background: linear-gradient(
+    100deg,
+    #16437e,
+    #0e2c57
+  ) !important;
+
+  border-left-color: #4bdcf9 !important;
+
+  box-shadow:
+    inset 0 1px 0 #b1e8ff23,
+    0 0 12px #0e78ec18;
+}
+
+/* BRANDING OFICIAL */
+
+.cq-brand {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  min-height: 65px;
+  padding: 1px 2px 10px;
+
+  background: radial-gradient(
+    ellipse at 28% 40%,
+    rgba(21, 125, 178, .12),
+    transparent 71%
+  );
+
+  border-bottom: 1px solid #27436a;
+}
+
+.cq-brand-symbol {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  width: 58px;
+  height: 58px;
+  flex: 0 0 58px;
+  overflow: visible;
+}
+
+.cq-brand-symbol::before {
+  content: "";
+  position: absolute;
+  inset: 6px;
+  border-radius: 50%;
+
+  background: rgba(34, 209, 241, .22);
+  filter: blur(14px);
+}
+
+.cq-shield-image {
+  position: relative;
+  display: block;
+
+  width: 60px;
+  height: 60px;
+  max-width: none;
+
+  object-fit: contain;
+  mix-blend-mode: screen;
+
+  filter:
+    brightness(1.18)
+    contrast(1.10)
+    drop-shadow(
+      0 0 5px rgba(66, 214, 245, .28)
+    );
+
+  -webkit-mask-image: radial-gradient(
+    ellipse at center,
+    #000 67%,
+    transparent 99%
+  );
+
+  mask-image: radial-gradient(
+    ellipse at center,
+    #000 67%,
+    transparent 99%
+  );
+}
+
+.cq-wordmark-image {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  max-width: 146px;
+
+  height: auto;
+  max-height: 41px;
+
+  object-fit: contain;
+  mix-blend-mode: screen;
+
+  filter:
+    brightness(1.16)
+    contrast(1.10)
+    drop-shadow(
+      0 0 4px rgba(84, 206, 248, .12)
+    );
+
+  -webkit-mask-image: none;
+  mask-image: none;
+}
+
+/* SOCIAL */
+
+.cq-social-card {
+  background: rgba(8, 24, 49, .96) !important;
+  border-color: #345a8c !important;
+}
+
+.cq-social-art {
+  background:
+    radial-gradient(
+      circle at 80% 75%,
+      #2869cb6b,
+      transparent 65%
+    ),
+    #0b2346 !important;
+}
+
+.cq-discord {
+  background: rgba(5, 15, 34, .92);
+}
+
+/* HOME */
+
+main.cq-home .cq-hero {
+  background: transparent !important;
+  border: 0 !important;
+  border-bottom: 1px solid #4177b044 !important;
+  box-shadow: none !important;
+}
+
+main.cq-home .cq-hero::before,
+main.cq-home .cq-hero::after {
+  display: none !important;
+}
+
+main.cq-home .cq-panel {
+  background: linear-gradient(
+    145deg,
+    rgba(10, 26, 51, .97),
+    rgba(5, 16, 36, .98)
+  ) !important;
+
+  border: 1px solid
+    rgba(65, 125, 193, .69) !important;
+
+  box-shadow:
+    inset 0 1px 0 #c0ebff16,
+    0 12px 28px #00081766 !important;
+
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+main.cq-home .cq-panel h3 {
+  color: #f7faff;
+  font-weight: 700;
+}
+
+main.cq-home .cq-panel p {
+  color: #c8d7ea;
+}
+
+/* HOME — RODAPÉ LEGÍVEL */
+
+main.cq-home .cq-home-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-start;
+
+  gap: 10px 18px;
+  margin-top: 26px;
+  padding: 17px 12px 20px;
+
+  background: rgba(4, 14, 32, .92) !important;
+
+  border-top: 1px solid #3b608a;
+  border-radius: 8px;
+
+  color: #b6c9df;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+main.cq-home .cq-home-footer span:first-child {
+  color: #c8d8ed;
+}
+
+main.cq-home .cq-home-footer span:last-child {
+  color: #e5f1ff;
+  font-weight: 500;
+  padding-left: 12px;
+  border-left: 2px solid #57d8ec;
+  text-shadow: none;
+}
+
+/* SCAN — TOPO */
+
+main:has(form#scan) section:has(form#scan) {
+  background: transparent !important;
+  background-image: none !important;
+
+  border: 0 !important;
+  border-bottom: 1px solid #4386cb55 !important;
+
+  box-shadow: none !important;
+}
+
+main:has(form#scan)
+section:has(form#scan) > div[aria-hidden="true"] {
+  display: none !important;
+}
+
+/* SCAN — PESQUISA */
+
+main:has(form#scan) form#scan {
+  background: rgba(7, 24, 51, .97) !important;
+  border: 1px solid #43a7f9 !important;
+
+  box-shadow:
+    inset 0 1px 0 #b3ebff30,
+    0 0 0 1px #218df322,
+    0 0 18px #147ff32d !important;
+}
+
+main:has(form#scan) form#scan:focus-within {
+  border-color: #77e0fb !important;
+
+  box-shadow:
+    0 0 0 2px #38b5ff28,
+    0 0 22px #168df13b !important;
+}
+
+main:has(form#scan)
+form#scan button[type="submit"] {
+  background: linear-gradient(
+    110deg,
+    #236ee8,
+    #348dff
+  ) !important;
+}
+
+/* SCAN — PAINÉIS */
+
+main:has(form#scan) #results > section,
+main:has(form#scan) #scan-context {
+  background: linear-gradient(
+    145deg,
+    rgba(9, 25, 50, .98),
+    rgba(5, 16, 36, .99)
+  ) !important;
+
+  border: 1px solid
+    rgba(68, 122, 190, .70) !important;
+
+  box-shadow:
+    inset 0 1px 0 #c6e8ff16,
+    0 13px 32px #00071466 !important;
+
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+main:has(form#scan)
+#results button[aria-expanded] {
+  min-height: 146px;
+}
+
+main:has(form#scan)
+#results button[aria-expanded] strong {
+  line-height: 1.45;
+  color: #f8fbff;
+}
+
+main:has(form#scan)
+#results button[aria-expanded]:focus-visible {
+  outline: 2px solid #73d9ff;
+  outline-offset: -2px;
+}
+
+main:has(form#scan)
+#results [style*="conic-gradient"] {
+  filter: drop-shadow(
+    0 0 10px rgba(244, 160, 75, .18)
+  );
+}
+
+/* SCAN — CONTEXTO SEM CAPA DUPLICADA */
+
+main:has(form#scan)
+#scan-context [style*="cerynq-cover.png"] {
+  display: none !important;
+}
+
+main:has(form#scan)
+#scan-context > div.relative {
+  background: linear-gradient(
+    145deg,
+    #102a50,
+    #081a35
+  ) !important;
+}
+
+main:has(form#scan)
+#scan-context > div.space-y-2 > div {
+  background: #102541 !important;
+  border-color: #315777 !important;
+}
+
+/* SCAN — AVISO E RODAPÉ LEGÍVEIS */
+
+main:has(form#scan) #results > p {
+  color: #d2e0f1 !important;
+  background: rgba(5, 15, 34, .92);
+
+  border-left: 2px solid #427ec0;
+  border-radius: 4px;
+  padding: 9px 12px;
+}
+
+main:has(form#scan) footer {
+  justify-content: flex-start !important;
+  gap: 10px 24px;
+  color: #bed0e6 !important;
+
+  background: rgba(4, 14, 32, .90);
+  padding: 14px 12px 18px;
+  border-radius: 6px;
+}
+
+/* RESOURCES — HERO */
+
+main:has(nav[aria-label="Resource topics"])
+div.rounded-2xl.p-px:has(section h1) {
+  background: transparent !important;
+  padding: 0 !important;
+}
+
+main:has(nav[aria-label="Resource topics"])
+section:has(h1) {
+  background: transparent !important;
+  background-image: none !important;
+
+  border: 0 !important;
+  box-shadow: none !important;
+}
+
+main:has(nav[aria-label="Resource topics"])
+section:has(h1) > div.relative.hidden {
+  display: none !important;
+}
+
+/* RESOURCES — NAVEGAÇÃO */
+
+main:has(nav[aria-label="Resource topics"])
+aside:has(nav[aria-label="Resource topics"]) {
+  background: rgba(8, 23, 46, .98) !important;
+  border-color: #365b89 !important;
+}
+
+main:has(nav[aria-label="Resource topics"])
+nav[aria-label="Resource topics"]
+a[aria-current="location"] {
+  background: linear-gradient(
+    95deg,
+    #174a83,
+    #102b56
+  ) !important;
+
+  border-color: #70cbee !important;
+  color: #fff !important;
+}
+
+/* RESOURCES — CARDS */
+
+main:has(nav[aria-label="Resource topics"])
+article[id] {
+  background: linear-gradient(
+    150deg,
+    rgba(11, 29, 56, .98),
+    rgba(5, 16, 36, .99)
+  ) !important;
+
+  border-color: #356495 !important;
+
+  box-shadow:
+    inset 0 1px 0 #c7ecff14,
+    0 12px 30px #00071455 !important;
+
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+main:has(nav[aria-label="Resource topics"])
+article[id][class*="border-[#d0e6f4]"] {
+  border-color: #9eddf6 !important;
+  background: #142b4c !important;
+
+  box-shadow:
+    inset 0 1px 0 #e8f7ff35,
+    0 0 17px #1477de30 !important;
+}
+
+main:has(nav[aria-label="Resource topics"])
+footer {
+  justify-content: flex-start !important;
+  gap: 10px 24px;
+  color: #c4d4e8 !important;
+}
+
+/* RESPONSIVIDADE */
+
+@media (max-width: 1023px) {
+  main:has(.cq-sidebar)::before {
+    inset: 0;
+
+    background-position:
+      center,
+      center,
+      65% center;
+  }
+}
+
+@media (max-width: 640px) {
+  main:has(.cq-sidebar)::before {
+    background-image:
+      linear-gradient(
+        90deg,
+        rgba(3, 8, 23, .95),
+        rgba(3, 8, 23, .70)
+      ),
+      linear-gradient(
+        180deg,
+        transparent 30%,
+        #03081770
+      ),
+      url("/cerynq-main-bg.webp");
+
+    background-position:
+      center,
+      center,
+      69% center;
+  }
+
+  main.cq-home .cq-home-footer span:last-child {
+    flex-basis: 100%;
+  }
+}
+
+/* ACESSIBILIDADE */
+
+main:has(.cq-sidebar)
+:is(a, button):focus-visible {
+  outline: 2px solid #72d8f5;
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  main:has(.cq-sidebar) * {
+    scroll-behavior: auto !important;
+  }
+}
