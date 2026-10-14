@@ -3,61 +3,73 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import {
-  FormEvent,
-  useEffect,
-  useId,
-  useRef,
-  useState,
-} from "react";
-import type { ReactNode } from "react";
+import { useState, type FormEvent, type ReactNode } from "react";
 
 type FindingStatus = "detected" | "not_detected" | "unknown";
-type FindingConfidence = "high" | "medium" | "low";
-type VerificationStatus =
+type Confidence = "high" | "medium" | "low";
+type Verification =
   | "fully_verified"
   | "partially_verified"
   | "verified"
   | "unverified"
   | "unknown";
-type AbiEvidenceQuality = "full" | "limited" | "unknown";
+type Assessment = "complete" | "partial" | "insufficient";
+type Operational = "normal" | "degraded" | "limited" | "unavailable";
 
-type FindingEvidence = {
-  type: string;
-  source: string;
-  method?: string;
-  methods?: string[];
-  interfaceSource?: string | null;
-};
-
-type BaseFinding = {
+type Finding = {
   id: string;
   name: string;
   status: FindingStatus;
   severity: "low" | "medium";
   scoreImpact: number;
-  confidence: FindingConfidence;
-  evidence: FindingEvidence;
+  confidence: Confidence;
   explanation: string;
+  evidence: {
+    type: string;
+    source: string;
+    method?: string;
+    methods?: string[];
+    interfaceSource?: string | null;
+  };
+  ownerAddress?: string | null;
+  renounced?: boolean | null;
 };
 
-type OwnershipFinding = BaseFinding & {
-  id: "A1";
-  name: "Active Ownership";
-  ownerAddress: string | null;
-  renounced: boolean | null;
+type Intelligence = {
+  proxyType: string | null;
+  proxyResolutionSource:
+    | "onchain_bytecode"
+    | "blockscout"
+    | "sourcify"
+    | null;
+  implementationAddress: string | null;
+  implementationResolutionSource:
+    | "onchain_bytecode"
+    | "blockscout"
+    | "sourcify"
+    | null;
+  implementationAddresses: string[];
+  hasMultipleImplementations: boolean;
+  contractName: string | null;
+  implementationContractName: string | null;
+  abiAvailable: boolean;
+  abiProvider: "blockscout" | "sourcify" | null;
+  abiSource: "contract" | "implementation" | null;
+  abiVerificationStatus: Verification;
+  abiEvidenceQuality: "full" | "limited" | "unknown";
+  hasOwnerFunction: boolean | null;
+  contractVerificationStatus: Verification;
+  implementationVerificationStatus: Verification;
 };
 
-type AssessmentStatus = "complete" | "partial" | "insufficient";
-
-type RiskResult = {
+type Risk = {
   version: "0.1";
-  assessmentStatus: AssessmentStatus;
+  assessmentStatus: Assessment;
   rawScore: number;
   maxScore: number;
   normalizedScore: number;
   riskLevel: "unknown" | "low" | "moderate" | "high" | "critical";
-  confidence: FindingConfidence;
+  confidence: Confidence;
   coverage: {
     totalFindings: number;
     knownFindings: number;
@@ -66,58 +78,6 @@ type RiskResult = {
   };
   detectedFindings: string[];
   explanation: string;
-};
-
-type OperationalStatus =
-  | "normal"
-  | "degraded"
-  | "limited"
-  | "unavailable";
-
-type ProviderOperationalStatus =
-  | "available"
-  | "not_found"
-  | "rate_limited"
-  | "unauthorized"
-  | "timeout"
-  | "server_error"
-  | "network_error"
-  | "configuration_error"
-  | "invalid_response"
-  | "http_error"
-  | "error"
-  | "not_used";
-
-type ProviderState = {
-  status: ProviderOperationalStatus;
-  usedForAbi: boolean;
-};
-
-type AbiProvider = "blockscout" | "sourcify" | null;
-type AbiSource = "contract" | "implementation" | null;
-type ResolutionSource =
-  | "onchain_bytecode"
-  | "blockscout"
-  | "sourcify"
-  | null;
-
-type IntelligenceResult = {
-  proxyType: string | null;
-  proxyResolutionSource: ResolutionSource;
-  implementationAddress: string | null;
-  implementationResolutionSource: ResolutionSource;
-  implementationAddresses: string[];
-  hasMultipleImplementations: boolean;
-  contractName: string | null;
-  implementationContractName: string | null;
-  abiAvailable: boolean;
-  abiProvider: AbiProvider;
-  abiSource: AbiSource;
-  abiVerificationStatus: VerificationStatus;
-  abiEvidenceQuality: AbiEvidenceQuality;
-  hasOwnerFunction: boolean | null;
-  contractVerificationStatus: VerificationStatus;
-  implementationVerificationStatus: VerificationStatus;
 };
 
 type ScanResult = {
@@ -131,284 +91,27 @@ type ScanResult = {
   bytecodeDetected: boolean;
   bytecodeSize: number;
   providers: {
-    blockscout: ProviderState;
-    sourcify: ProviderState;
+    blockscout: { status: string; usedForAbi: boolean };
+    sourcify: { status: string; usedForAbi: boolean };
   };
-  intelligence: IntelligenceResult;
-  ownership: OwnershipFinding | null;
-  pause: BaseFinding | null;
-  blacklist: BaseFinding | null;
-  whitelist: BaseFinding | null;
-  privileged: BaseFinding | null;
-  risk: RiskResult | null;
+  intelligence: Intelligence;
+  ownership: Finding | null;
+  pause: Finding | null;
+  blacklist: Finding | null;
+  whitelist: Finding | null;
+  privileged: Finding | null;
+  risk: Risk | null;
 };
 
-type ScanErrorResult = {
-  ok: false;
-  network?: string;
-  chainId?: number;
-  address?: string;
-  operationalStatus?: OperationalStatus;
-  error?: string;
-};
-
-type ScanResponse = ScanResult | ScanErrorResult;
-
-type InfoTooltipProps = {
-  title: string;
-  children: ReactNode;
-};
-
-function InfoTooltip({ title, children }: InfoTooltipProps) {
-  const [open, setOpen] = useState(false);
-  const containerRef = useRef<HTMLSpanElement | null>(null);
-  const tooltipId = useId();
-
-  useEffect(() => {
-    function handlePointerDown(event: MouseEvent | TouchEvent) {
-      if (
-        containerRef.current &&
-        !containerRef.current.contains(event.target as Node)
-      ) {
-        setOpen(false);
-      }
-    }
-
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") setOpen(false);
-    }
-
-    document.addEventListener("mousedown", handlePointerDown);
-    document.addEventListener("touchstart", handlePointerDown);
-    document.addEventListener("keydown", handleKeyDown);
-
-    return () => {
-      document.removeEventListener("mousedown", handlePointerDown);
-      document.removeEventListener("touchstart", handlePointerDown);
-      document.removeEventListener("keydown", handleKeyDown);
+type ScanResponse =
+  | ScanResult
+  | {
+      ok: false;
+      error?: string;
+      operationalStatus?: Operational;
     };
-  }, []);
 
-  return (
-    <span
-      ref={containerRef}
-      className="group relative inline-flex"
-      onMouseEnter={() => setOpen(true)}
-      onMouseLeave={() => setOpen(false)}
-      onBlur={(event) => {
-        if (
-          !event.currentTarget.contains(
-            event.relatedTarget as Node | null
-          )
-        ) {
-          setOpen(false);
-        }
-      }}
-    >
-      <button
-        type="button"
-        aria-label={`Information about ${title}`}
-        aria-describedby={open ? tooltipId : undefined}
-        aria-expanded={open}
-        onClick={() => setOpen((value) => !value)}
-        onFocus={() => setOpen(true)}
-        className="inline-flex h-7 w-7 items-center justify-center rounded-full text-zinc-500 transition hover:text-zinc-200 focus:text-zinc-200 focus:outline-none"
-      >
-        <span className="flex h-4 w-4 items-center justify-center rounded-full border border-zinc-700 text-[10px] font-medium">
-          i
-        </span>
-      </button>
-
-      <span
-        id={tooltipId}
-        role="tooltip"
-        className={`absolute left-1/2 top-8 z-50 w-72 max-w-[calc(100vw-3rem)] -translate-x-1/2 rounded-lg border border-zinc-700 bg-zinc-900 p-4 text-left shadow-2xl transition ${
-          open ? "visible opacity-100" : "invisible opacity-0"
-        }`}
-      >
-        <span className="block text-xs font-medium text-zinc-200">
-          {title}
-        </span>
-        <span className="mt-2 block text-xs leading-5 text-zinc-400">
-          {children}
-        </span>
-      </span>
-    </span>
-  );
-}
-
-function MetricLabel({
-  label,
-  tooltipTitle,
-  children,
-}: {
-  label: string;
-  tooltipTitle: string;
-  children: ReactNode;
-}) {
-  return (
-    <div className="flex items-center gap-1">
-      <span className="text-sm text-zinc-400">{label}</span>
-      <InfoTooltip title={tooltipTitle}>{children}</InfoTooltip>
-    </div>
-  );
-}
-
-function formatStatus(status: FindingStatus) {
-  if (status === "detected") return "Identified";
-  if (status === "not_detected") return "Not identified";
-  return "Unknown";
-}
-
-function formatConfidence(confidence?: FindingConfidence) {
-  if (!confidence) return "Unknown";
-  return confidence.charAt(0).toUpperCase() + confidence.slice(1);
-}
-
-function formatVerificationStatus(status?: VerificationStatus) {
-  if (status === "fully_verified") return "Fully verified";
-  if (status === "partially_verified") return "Partially verified";
-  if (status === "verified") return "Verified (tier not reported)";
-  if (status === "unverified") return "Unverified";
-  return "Unknown";
-}
-
-function formatAbiEvidenceQuality(quality?: AbiEvidenceQuality) {
-  if (quality === "full") return "Full";
-  if (quality === "limited") return "Limited";
-  return "Unknown";
-}
-
-function formatOperationalStatus(status?: OperationalStatus) {
-  if (status === "normal") return "Normal";
-  if (status === "degraded") return "Degraded";
-  if (status === "limited") return "Limited";
-  if (status === "unavailable") return "Unavailable";
-  return "Unknown";
-}
-
-function formatAbiProvider(provider?: AbiProvider) {
-  if (provider === "blockscout") return "Blockscout";
-  if (provider === "sourcify") return "Sourcify";
-  return "Unavailable";
-}
-
-function formatProviderStatus(status?: ProviderOperationalStatus) {
-  if (!status) return "Unknown";
-  return status
-    .replaceAll("_", " ")
-    .replace(/^./, (character) => character.toUpperCase());
-}
-
-function getOperationalStatusClasses(
-  status: Exclude<OperationalStatus, "unavailable">
-) {
-  if (status === "degraded") {
-    return "border-amber-900/50 bg-amber-950/20 text-amber-200/80";
-  }
-  if (status === "limited") {
-    return "border-sky-900/50 bg-sky-950/20 text-sky-200/80";
-  }
-  return "border-zinc-800 bg-zinc-950 text-zinc-300";
-}
-
-function formatEvidenceType(type: string) {
-  if (type === "rpc_call") return "Direct RPC observation";
-  if (type === "fully_verified_abi") return "Fully verified ABI";
-  if (type === "limited_abi") return "Limited-provenance ABI";
-  if (type === "abi_unavailable") return "ABI unavailable";
-  return type
-    .replaceAll("_", " ")
-    .replace(/^./, (character) => character.toUpperCase());
-}
-
-function formatRiskLevel(riskLevel: RiskResult["riskLevel"]) {
-  if (riskLevel === "low") return "Low";
-  if (riskLevel === "moderate") return "Moderate";
-  if (riskLevel === "high") return "High";
-  if (riskLevel === "critical") return "Critical";
-  return "Unknown";
-}
-
-function formatProxyType(proxyType?: string | null) {
-  if (!proxyType) return "Not identified";
-  const normalizedProxyType = proxyType.toLowerCase();
-  if (normalizedProxyType === "eip1167") return "EIP-1167";
-  if (normalizedProxyType === "eip1967") return "EIP-1967";
-  return proxyType;
-}
-
-function formatResolutionSource(source?: ResolutionSource) {
-  if (source === "onchain_bytecode") {
-    return "Resolved from onchain bytecode";
-  }
-  if (source === "blockscout") return "Reported by Blockscout";
-  if (source === "sourcify") return "Reported by Sourcify";
-  return "Unavailable";
-}
-
-function getStatusClasses(status: FindingStatus) {
-  if (status === "detected") {
-    return "border-amber-800/70 bg-amber-950/30 text-amber-300";
-  }
-  if (status === "unknown") {
-    return "border-sky-900/70 bg-sky-950/20 text-sky-300";
-  }
-  return "border-zinc-800 bg-zinc-900/50 text-zinc-400";
-}
-
-function getRiskClasses(riskLevel: RiskResult["riskLevel"]) {
-  if (riskLevel === "critical") {
-    return "border-red-800/70 bg-red-950/30 text-red-300";
-  }
-  if (riskLevel === "high") {
-    return "border-orange-800/70 bg-orange-950/30 text-orange-300";
-  }
-  if (riskLevel === "moderate") {
-    return "border-amber-800/70 bg-amber-950/30 text-amber-300";
-  }
-  return "border-zinc-700 bg-zinc-900 text-zinc-300";
-}
-
-function getAssessmentClasses(status: AssessmentStatus) {
-  if (status === "partial") {
-    return "border-amber-800/70 bg-amber-950/30 text-amber-300";
-  }
-  if (status === "insufficient") {
-    return "border-sky-900/70 bg-sky-950/20 text-sky-300";
-  }
-  return "border-zinc-700 bg-zinc-900 text-zinc-300";
-}
-
-function getEvidenceMethods(finding: BaseFinding) {
-  if (finding.evidence.type === "abi_unavailable") {
-    return "ABI unavailable";
-  }
-  if (finding.evidence.methods && finding.evidence.methods.length > 0) {
-    return finding.evidence.methods.join(", ");
-  }
-  if (finding.evidence.method) return finding.evidence.method;
-  return "No supported methods identified";
-}
-
-function getAssessmentLabel(risk: RiskResult) {
-  if (risk.assessmentStatus === "partial") {
-    return "Partial assessment";
-  }
-  if (risk.assessmentStatus === "insufficient") {
-    return "Insufficient evidence";
-  }
-  return formatRiskLevel(risk.riskLevel);
-}
-
-function getScoreLabel(risk: RiskResult) {
-  if (risk.assessmentStatus === "partial") {
-    return "Observed signal score";
-  }
-  return "Privileged-control risk score";
-}
-
-const RESOURCE_ANCHORS: Record<string, string> = {
+const controlTopics: Record<string, string> = {
   A1: "ownership",
   A2: "pause",
   A3: "blacklist",
@@ -416,22 +119,289 @@ const RESOURCE_ANCHORS: Record<string, string> = {
   A5: "privileged",
 };
 
-function ResourceHelpLink({
-  topic,
-  label,
+const infoUrl = (topic: string) => `/resources#${topic}`;
+
+const statusText = (value: FindingStatus) =>
+  value === "detected"
+    ? "Identified"
+    : value === "not_detected"
+      ? "Not identified"
+      : "Unknown";
+
+const statusStyle = (value: FindingStatus) =>
+  value === "detected"
+    ? "border-amber-500/30 bg-amber-400/10 text-amber-300"
+    : value === "unknown"
+      ? "border-cyan-500/30 bg-cyan-400/10 text-cyan-300"
+      : "border-slate-500/30 bg-slate-400/10 text-slate-300";
+
+const verified = (value: Verification) =>
+  value === "fully_verified"
+    ? "Fully verified"
+    : value === "partially_verified"
+      ? "Partially verified"
+      : value === "verified"
+        ? "Verified (tier not reported)"
+        : value === "unverified"
+          ? "Unverified"
+          : "Unknown";
+
+const methodText = (finding: Finding) =>
+  finding.evidence.type === "abi_unavailable"
+    ? "ABI unavailable"
+    : finding.evidence.methods?.length
+      ? finding.evidence.methods.join(", ")
+      : finding.evidence.method ?? "No supported methods identified";
+
+const titleCase = (text: string) =>
+  text.replaceAll("_", " ").replace(/^./, (c) => c.toUpperCase());
+
+const proxyText = (value: string | null) =>
+  value === "eip1167"
+    ? "EIP-1167 minimal proxy"
+    : value === "eip1967"
+      ? "EIP-1967"
+      : value ?? "Not identified";
+
+const sourceText = (value: string | null) =>
+  value === "onchain_bytecode"
+    ? "Onchain bytecode"
+    : value === "blockscout"
+      ? "Blockscout"
+      : value === "sourcify"
+        ? "Sourcify"
+        : "Unavailable";
+
+function Glyph({
+  name,
+  size = 18,
 }: {
-  topic: string;
-  label: string;
+  name: string;
+  size?: number;
 }) {
+  const paths: Record<string, ReactNode> = {
+    home: (
+      <>
+        <path d="m3 10 9-7 9 7" />
+        <path d="M5 9v12h14V9" />
+        <path d="M9 21v-8h6v8" />
+      </>
+    ),
+    scan: (
+      <>
+        <circle cx="10.8" cy="10.8" r="7" />
+        <path d="m16 16 5 5" />
+      </>
+    ),
+    pulse: <path d="M2 12h5l3-7 4 14 3-7h5" />,
+    nodes: (
+      <>
+        <circle cx="12" cy="4" r="2" />
+        <circle cx="4" cy="20" r="2" />
+        <circle cx="20" cy="20" r="2" />
+        <path d="m11 6-6 12m8-12 6 12M6 20h12" />
+      </>
+    ),
+    building: (
+      <>
+        <path d="m3 10 9-6 9 6M5 10h14M6 20V10m4 10V10m4 10V10m4 10V10M3 21h18" />
+      </>
+    ),
+    book: (
+      <>
+        <path d="M12 6c-3-2-6-2-9-1v15c3-1 6-1 9 1 3-2 6-2 9-1V5c-3-1-6-1-9 1ZM12 6v15" />
+      </>
+    ),
+    globe: (
+      <>
+        <circle cx="12" cy="12" r="9" />
+        <path d="M3 12h18M12 3c-5 5-5 13 0 18M12 3c5 5 5 13 0 18" />
+      </>
+    ),
+    info: (
+      <>
+        <circle cx="12" cy="12" r="9" />
+        <path d="M12 11v6M12 7.5h.01" />
+      </>
+    ),
+    arrow: <path d="M4 12h16m-7-7 7 7-7 7" />,
+    check: <path d="m4 12 5 5L20 6" />,
+    shield: (
+      <>
+        <path d="m12 2 8 4v6c0 5-3 8-8 10-5-2-8-5-8-10V6l8-4Z" />
+        <path d="m9 12 2 2 4-4" />
+      </>
+    ),
+    layers: (
+      <>
+        <path d="m12 2 9 5-9 5-9-5 9-5ZM3 12l9 5 9-5M3 17l9 5 9-5" />
+      </>
+    ),
+    x: <path d="M4 4l16 16M20 4 4 20" />,
+  };
+
+  return (
+    <svg
+      aria-hidden="true"
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.65"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      {paths[name] ?? paths.info}
+    </svg>
+  );
+}
+
+function BrandWordmark() {
+  return (
+    <span
+      role="img"
+      aria-label="Cerynq"
+      className="block h-[29px] w-[145px] shrink-0 bg-no-repeat mix-blend-screen"
+      style={{
+        backgroundImage: "url('/cerynq-cover.png')",
+        backgroundSize: "410px 137px",
+        backgroundPosition: "-114px -46px",
+      }}
+    />
+  );
+}
+
+function SocialLinks({ compact = false }: { compact?: boolean }) {
+  return (
+    <div className={`flex items-center gap-2 ${compact ? "" : "mt-4"}`}>
+      <a
+        href="https://x.com/Cerynq"
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label="Cerynq on X"
+        title="Follow Cerynq on X"
+        className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-cyan-400/25 bg-cyan-500/10 text-cyan-100 transition hover:border-cyan-300 hover:bg-cyan-500/20"
+      >
+        <Glyph name="x" size={15} />
+      </a>
+      <span
+        title="Discord community link will be available later"
+        className={`${compact ? "hidden" : "inline-flex"} h-9 items-center gap-1.5 rounded-lg border border-slate-600/25 px-2.5 text-[11px] text-slate-500`}
+      >
+        Discord <span className="text-[9px]">Soon</span>
+      </span>
+    </div>
+  );
+}
+
+function Help({ topic, label }: { topic: string; label: string }) {
   return (
     <Link
-      href={`/resources#${topic}`}
-      title={`Learn more about ${label} in Resources`}
-      aria-label={`Learn more about ${label} in Resources`}
-      className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-sky-700/60 bg-sky-950/20 text-xs font-semibold text-sky-300 transition hover:border-sky-400 hover:bg-sky-900/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400"
+      href={infoUrl(topic)}
+      aria-label={`Learn more about ${label}`}
+      title={`Explain ${label} in Resources`}
+      className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-cyan-400 transition hover:bg-cyan-400/15 hover:text-cyan-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-cyan-400"
     >
-      <span aria-hidden="true">i</span>
+      <Glyph name="info" size={15} />
     </Link>
+  );
+}
+
+function Tag({
+  children,
+  tone = "neutral",
+}: {
+  children: ReactNode;
+  tone?: "neutral" | "blue" | "amber";
+}) {
+  const color =
+    tone === "blue"
+      ? "border-cyan-500/30 bg-cyan-500/10 text-cyan-200"
+      : tone === "amber"
+        ? "border-amber-500/30 bg-amber-500/10 text-amber-300"
+        : "border-white/10 bg-white/[0.04] text-slate-300";
+
+  return (
+    <span
+      className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-medium ${color}`}
+    >
+      {children}
+    </span>
+  );
+}
+
+function Card({
+  children,
+  className = "",
+}: {
+  children: ReactNode;
+  className?: string;
+}) {
+  return (
+    <section
+      className={`rounded-2xl border border-[#1e454e] bg-[#0b1b21]/90 shadow-[0_14px_45px_rgba(0,0,0,0.17)] ${className}`}
+    >
+      {children}
+    </section>
+  );
+}
+
+function Datum({
+  label,
+  value,
+}: {
+  label: string;
+  value: ReactNode;
+}) {
+  return (
+    <div className="min-w-0">
+      <dt className="text-xs text-slate-400">{label}</dt>
+      <dd className="mt-1 break-words text-sm font-medium text-slate-100">
+        {value}
+      </dd>
+    </div>
+  );
+}
+
+function EvidenceTile({
+  title,
+  detail,
+  result,
+  tone,
+  topic,
+}: {
+  title: string;
+  detail: string;
+  result: string;
+  tone: "observed" | "unknown" | "neutral";
+  topic: string;
+}) {
+  return (
+    <div className="min-w-0 rounded-xl border border-[#26535b] bg-[#102932]/80 p-3.5">
+      <div className="flex items-start justify-between gap-2">
+        <span
+          className={`flex h-6 w-6 items-center justify-center rounded-full ${
+            tone === "observed"
+              ? "bg-emerald-400/15 text-emerald-300"
+              : tone === "unknown"
+                ? "bg-cyan-400/15 text-cyan-300"
+                : "bg-slate-400/15 text-slate-300"
+          }`}
+        >
+          <Glyph
+            name={tone === "observed" ? "check" : "info"}
+            size={15}
+          />
+        </span>
+        <Help topic={topic} label={title} />
+      </div>
+      <p className="mt-3 text-sm font-semibold text-white">{title}</p>
+      <p className="mt-1 text-xs font-medium text-cyan-200">{result}</p>
+      <p className="mt-1.5 text-xs leading-5 text-slate-400">
+        {detail}
+      </p>
+    </div>
   );
 }
 
@@ -441,10 +411,13 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [errorOperationalStatus, setErrorOperationalStatus] =
-    useState<OperationalStatus | null>(null);
+    useState<Operational | null>(null);
 
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  const ARGUS_ADDRESS = "0xeCe5cA8bf9220718E5727754026757512212cb3c";
+
+  async function performScan(targetAddress: string) {
+    if (loading) return;
+
     setLoading(true);
     setError("");
     setErrorOperationalStatus(null);
@@ -456,9 +429,7 @@ export default function Home() {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-          address: address.trim(),
-        }),
+        body: JSON.stringify({ address: targetAddress.trim() }),
       });
 
       const data: ScanResponse = await response.json();
@@ -470,743 +441,1056 @@ export default function Home() {
       }
 
       if (!response.ok) {
-        setErrorOperationalStatus(null);
         setError("Unable to analyze address.");
         return;
       }
 
       setResult(data);
+      requestAnimationFrame(() =>
+        document
+          .getElementById("results")
+          ?.scrollIntoView({ behavior: "smooth", block: "start" })
+      );
     } catch {
-      setErrorOperationalStatus(null);
       setError("Unable to connect to the Cerynq scan service.");
     } finally {
       setLoading(false);
     }
   }
 
-  const findings: BaseFinding[] =
-    result?.ok
-      ? [
-          result.ownership,
-          result.pause,
-          result.blacklist,
-          result.whitelist,
-          result.privileged,
-        ].filter(
-          (finding): finding is BaseFinding =>
-            finding !== null && finding !== undefined
-        )
-      : [];
+  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    void performScan(address);
+  }
+
+  const findings = result
+    ? [
+        result.ownership,
+        result.pause,
+        result.blacklist,
+        result.whitelist,
+        result.privileged,
+      ].filter((f): f is Finding => f != null)
+    : [];
+
+  const observed = findings.filter((f) => f.status === "detected");
+  const unknown = findings.filter((f) => f.status === "unknown");
+  const risk = result?.risk;
+  const score = risk?.normalizedScore ?? 0;
+
+  const scoreAccent =
+    risk?.assessmentStatus !== "complete"
+      ? "#34d6e8"
+      : risk?.riskLevel === "critical" || risk?.riskLevel === "high"
+        ? "#fb7185"
+        : risk?.riskLevel === "moderate"
+          ? "#fbbf24"
+          : "#34d399";
+
+  const riskHeadline =
+    risk?.assessmentStatus === "insufficient"
+      ? "Insufficient evidence for a risk assessment."
+      : unknown.length > 0
+        ? "Some contract controls remain unresolved."
+        : observed.length > 0
+          ? `${observed.length} privileged-control signal${
+              observed.length > 1 ? "s" : ""
+            } identified.`
+          : "No supported privileged-control signals identified.";
+
+  const riskExplanation =
+    risk?.assessmentStatus === "partial"
+      ? "This score reflects only resolved checks. Unknown results prevent an overall risk classification."
+      : risk?.assessmentStatus === "insufficient"
+        ? "The available evidence is insufficient to classify the current model checks."
+        : risk?.explanation ??
+          "The result reflects supported controls, not a guarantee of contract safety.";
+
+  const sourcePresent = result?.intelligence.abiProvider != null;
 
   return (
-    <main className="min-h-screen bg-black text-white">
-      <div className="mx-auto w-full max-w-6xl px-6">
-        <header className="flex h-24 items-center justify-between border-b border-zinc-900">
-          <div className="flex items-center gap-3">
+    <main className="min-h-screen bg-[#030b0d] text-[#f5f8ff]">
+      <div className="mx-auto flex min-h-screen max-w-[1800px]">
+        <aside className="sticky top-0 hidden h-screen w-64 shrink-0 flex-col border-r border-[#183840] bg-[#071114] px-4 py-6 lg:flex">
+          <Link
+            href="#home"
+            className="mb-12 flex items-center gap-2.5 px-2"
+          >
             <Image
               src="/cerynq-logo.png"
-              alt="Cerynq"
-              width={52}
-              height={52}
+              alt="Official Cerynq shield"
+              width={56}
+              height={56}
+              className="h-14 w-14 object-contain mix-blend-screen"
               priority
-              className="h-12 w-12 object-contain sm:h-[52px] sm:w-[52px]"
             />
+            <BrandWordmark />
+          </Link>
 
-            <div className="flex items-center gap-3">
-              <span className="bg-gradient-to-b from-white via-zinc-200 to-zinc-500 bg-clip-text text-xl font-semibold tracking-wide text-transparent sm:text-2xl">
-                Cerynq
-              </span>
+          <p className="px-3 pb-3 text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-500">
+            Workspace
+          </p>
 
-              <span className="rounded-full border border-cyan-900/70 bg-cyan-950/20 px-2.5 py-1 text-[9px] font-medium uppercase tracking-[0.16em] text-cyan-400">
-                Beta
-              </span>
+          <nav aria-label="Main navigation" className="space-y-1.5">
+            <Link
+              href="#home"
+              className="flex items-center gap-3 rounded-xl bg-cyan-600/20 px-3 py-3 text-sm font-semibold text-cyan-100"
+            >
+              <Glyph name="home" /> Home
+            </Link>
+            <Link
+              href="#scan"
+              className="flex items-center gap-3 rounded-xl px-3 py-3 text-sm text-slate-300 transition hover:bg-white/5"
+            >
+              <Glyph name="scan" /> Scan
+            </Link>
+            <div
+              className="flex items-center gap-3 px-3 py-3 text-sm text-slate-500"
+              title="Planned feature"
+            >
+              <Glyph name="pulse" /> Monitor
+              <span className="ml-auto text-[10px]">Soon</span>
             </div>
-          </div>
+            <div
+              className="flex items-center gap-3 px-3 py-3 text-sm text-slate-500"
+              title="Planned feature"
+            >
+              <Glyph name="nodes" /> Investigations
+              <span className="ml-auto text-[10px]">Soon</span>
+            </div>
+            <a
+              href="#roadmap"
+              className="flex items-center gap-3 rounded-xl px-3 py-3 text-sm text-slate-300 transition hover:bg-white/5"
+            >
+              <Glyph name="building" /> Institutional
+            </a>
+          </nav>
 
-          <nav
-            aria-label="Main navigation"
-            className="flex items-center gap-3 sm:gap-4"
-          >
+          <div className="my-6 border-t border-[#183840]" />
+
+          <nav aria-label="Information" className="space-y-1.5">
+            <a
+              href="#arc"
+              className="flex items-center gap-3 rounded-xl px-3 py-3 text-sm text-slate-300 transition hover:bg-white/5"
+            >
+              <Glyph name="globe" /> Arc Mainnet
+            </a>
             <Link
               href="/resources"
-              className="text-xs font-medium text-sky-300 transition hover:text-sky-200 focus-visible:outline-none focus-visible:underline sm:text-sm"
+              className="flex items-center gap-3 rounded-xl px-3 py-3 text-sm text-slate-300 transition hover:bg-white/5"
             >
-              Resources
+              <Glyph name="book" /> Resources
             </Link>
-            <span className="hidden rounded-full border border-zinc-800 bg-zinc-950 px-3 py-1.5 text-xs text-zinc-400 sm:inline-flex">
-              Arc Mainnet
-            </span>
           </nav>
-        </header>
 
-        <div className="mx-auto max-w-4xl pb-20 pt-16">
-          <section className="text-center">
-            <p className="text-xs uppercase tracking-[0.28em] text-zinc-500">
-              Built on Arc
+          <div className="mt-auto overflow-hidden rounded-2xl border border-cyan-500/20 bg-gradient-to-br from-[#102a31] to-[#061317] p-4">
+            <div
+              className="relative h-24 overflow-hidden rounded-lg bg-[#071329] bg-cover bg-right"
+              style={{
+                backgroundImage: "url('/cerynq-cover.png')",
+              }}
+              role="img"
+              aria-label="Cerynq official network artwork"
+            />
+            <p className="mt-3 text-sm font-semibold">
+              Trust through evidence.
             </p>
-
-            <h1 className="mx-auto mt-5 max-w-3xl text-4xl font-semibold tracking-tight sm:text-6xl">
-              Explainable onchain risk intelligence.
-            </h1>
-
-            <p className="mx-auto mt-6 max-w-2xl text-base leading-7 text-zinc-400 sm:text-lg">
-              Understand contract controls on Arc Mainnet, review the
-              supporting evidence, and learn what to check before
-              interacting. Clear explanations, without promises of safety.
+            <p className="mt-2 text-xs leading-5 text-cyan-100/60">
+              Clarity for every onchain decision.
             </p>
-          </section>
+            <SocialLinks />
+          </div>
+        </aside>
 
-          <section className="mt-10 rounded-2xl border border-zinc-800 bg-zinc-950/70 p-5 shadow-2xl shadow-black/20 sm:p-6">
-            <div className="mb-5">
-              <p className="text-sm font-medium text-zinc-200">
-                Analyze an Arc smart contract
-              </p>
-              <p className="mt-1 text-sm leading-6 text-zinc-500">
-                Paste a smart-contract address to examine supported risk
-                signals, evidence, and limitations.
-              </p>
+        <div className="min-w-0 flex-1">
+          <header className="flex h-16 items-center justify-between border-b border-[#183840] px-5 lg:hidden">
+            <Link href="#home" className="flex items-center gap-2 font-semibold">
+              <Image
+                src="/cerynq-logo.png"
+                alt="Official Cerynq shield"
+                width={48}
+                height={48}
+                className="h-10 w-10 mix-blend-screen"
+              />
+              <BrandWordmark />
+            </Link>
+            <div className="flex items-center gap-3">
+              <SocialLinks compact />
+              <Link
+                href="/resources"
+                className="text-sm font-medium text-cyan-300"
+              >
+                Resources
+              </Link>
             </div>
+          </header>
 
-            <form
-              onSubmit={handleSubmit}
-              className="flex flex-col gap-3 sm:flex-row"
+          <div className="mx-auto w-full max-w-[1500px] px-4 pb-20 pt-5 sm:px-6 lg:px-7">
+            <section
+              id="home"
+              className="relative isolate overflow-hidden rounded-2xl border border-[#1d4b57] bg-[#071a20] px-6 pb-7 pt-8 sm:px-9 sm:pt-9"
             >
-              <input
-                type="text"
-                value={address}
-                disabled={loading}
-                onChange={(event) => {
-                  setAddress(event.target.value);
-                  if (result) setResult(null);
-                  if (error) {
-                    setError("");
-                    setErrorOperationalStatus(null);
-                  }
+              <div
+                aria-hidden="true"
+                className="pointer-events-none absolute inset-0 bg-cover bg-right opacity-60"
+                style={{
+                  backgroundImage: "url('/cerynq-cover.png')",
                 }}
-                placeholder="0x..."
-                className="h-12 flex-1 rounded-lg border border-zinc-800 bg-black px-4 font-mono text-sm text-white outline-none placeholder:text-zinc-700 focus:border-zinc-600 disabled:opacity-60"
+              />
+              <div
+                aria-hidden="true"
+                className="pointer-events-none absolute inset-0 bg-gradient-to-r from-[#061418] via-[#061418]/95 to-[#061418]/30"
               />
 
-              <button
-                type="submit"
-                disabled={loading}
-                className="h-12 rounded-lg bg-white px-7 text-sm font-medium text-black transition hover:bg-zinc-200 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {loading ? "Analyzing..." : "Analyze"}
-              </button>
-            </form>
-
-            <div className="mt-5 flex flex-wrap gap-x-6 gap-y-2 border-t border-zinc-900 pt-5 text-xs text-zinc-500">
-              <span>Proxy-aware analysis</span>
-              <span>Traceable evidence</span>
-              <span>Built on Arc</span>
-            </div>
-
-            {error && (
-              <div className="mt-5 rounded-lg border border-red-900/50 bg-red-950/30 p-4 text-left">
-                {errorOperationalStatus === "unavailable" && (
-                  <p className="text-xs font-medium uppercase tracking-[0.14em] text-red-300">
-                    Arc Mainnet unavailable
-                  </p>
-                )}
-                <p
-                  className={`text-sm text-red-300 ${
-                    errorOperationalStatus === "unavailable" ? "mt-2" : ""
-                  }`}
-                >
-                  {error}
+              <div className="relative z-10">
+                <p className="text-[11px] font-bold uppercase tracking-[0.3em] text-cyan-400">
+                  Trust through evidence
                 </p>
-              </div>
-            )}
-          </section>
+                <h1 className="mt-4 max-w-5xl text-3xl font-bold tracking-[-0.035em] text-white sm:text-4xl 2xl:text-[48px] 2xl:leading-[1.09]">
+                  Onchain Risk Intelligence for Arc
+                </h1>
+                <p className="mt-3 max-w-2xl text-sm leading-7 text-cyan-100/75 sm:text-base">
+                  Verified evidence. Explainable risk. Clearer decisions
+                  for onchain users and teams.
+                </p>
 
-          {result && (
-            <div className="mt-8 space-y-6">
-              {result.operationalStatus !== "normal" && (
-                <section
-                  className={`rounded-2xl border p-5 text-left ${getOperationalStatusClasses(
-                    result.operationalStatus
-                  )}`}
-                >
-                  <p className="text-xs font-medium uppercase tracking-[0.14em]">
-                    {formatOperationalStatus(result.operationalStatus)}{" "}
-                    evidence mode
-                  </p>
-                  <p className="mt-2 text-sm leading-6">
-                    {result.operationalStatus === "degraded"
-                      ? "The primary metadata source was unavailable or did not provide usable ABI evidence. Cerynq completed this scan with fallback evidence from Sourcify."
-                      : "Arc Mainnet remained reachable, but no supported ABI evidence was available from Blockscout or Sourcify. ABI-based checks may remain Unknown."}
-                  </p>
-                  <p className="mt-2 text-xs opacity-70">
-                    Blockscout:{" "}
-                    {formatProviderStatus(result.providers.blockscout.status)}
-                    {" · "}
-                    Sourcify:{" "}
-                    {formatProviderStatus(result.providers.sourcify.status)}
-                  </p>
-                </section>
-              )}
-
-              {!result.isContract && (
-                <section className="rounded-2xl border border-zinc-800 bg-zinc-950 p-6 text-left">
-                  <p className="text-sm font-medium text-zinc-200">
-                    No smart-contract bytecode detected
-                  </p>
-                  <p className="mt-2 text-sm leading-6 text-zinc-500">
-                    This address appears to be an externally owned account,
-                    so the current contract risk model was not applied.
-                  </p>
-                </section>
-              )}
-
-              {result.risk && (
-                <section className="rounded-2xl border border-zinc-800 bg-zinc-950 p-6 text-left sm:p-7">
-                  <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-                    <div>
-                      <p className="text-xs uppercase tracking-[0.2em] text-zinc-500">
-                        Risk Summary
-                      </p>
-                      <p className="mt-2 text-sm text-zinc-500">
-                        Risk Model v{result.risk.version}
-                      </p>
-                    </div>
-
-                    <span
-                      className={`w-fit rounded-full border px-4 py-2 text-xs font-medium uppercase tracking-[0.12em] ${
-                        result.risk.assessmentStatus === "complete"
-                          ? getRiskClasses(result.risk.riskLevel)
-                          : getAssessmentClasses(result.risk.assessmentStatus)
-                      }`}
-                    >
-                      {getAssessmentLabel(result.risk)}
-                    </span>
-                  </div>
-
-                  <div className="mt-7 flex flex-col gap-7 border-b border-zinc-800 pb-7 sm:flex-row sm:items-end sm:justify-between">
-                    <div>
-                      <div className="flex items-center gap-1">
-                        <p className="text-sm text-zinc-400">
-                          {result.risk.assessmentStatus === "insufficient"
-                            ? "Risk score"
-                            : getScoreLabel(result.risk)}
-                        </p>
-
-                        <InfoTooltip title="Privileged-control risk score">
-                          A weighted score of privileged-control signals
-                          identified by Risk Model v0.1, normalized to 0-100.
-                          It is not a complete security rating or
-                          smart-contract audit.
-                        </InfoTooltip>
-                      </div>
-
-                      {result.risk.assessmentStatus === "insufficient" ? (
-                        <div className="mt-2 text-5xl font-semibold tracking-tight text-zinc-300">
-                          N/A
-                        </div>
-                      ) : (
-                        <div className="mt-2 flex items-end gap-2">
-                          <span className="text-6xl font-semibold tracking-tight">
-                            {result.risk.normalizedScore}
-                          </span>
-                          <span className="pb-2 text-lg text-zinc-600">
-                            / 100
-                          </span>
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="max-w-sm text-sm leading-6 text-zinc-400">
-                      {result.risk.explanation}
-                    </div>
-                  </div>
-
-                  <div className="mt-5 rounded-xl border border-sky-900/40 bg-sky-950/15 p-4">
-                    <div className="flex items-center gap-2">
-                      <p className="text-sm font-medium text-sky-200">
-                        What this result tells you
-                      </p>
-                      <ResourceHelpLink
-                        topic="risk-model"
-                        label="the Cerynq risk model"
-                      />
-                    </div>
-                    <p className="mt-2 text-sm leading-6 text-zinc-400">
-                      This assessment covers a defined set of
-                      privileged-control signals. It is not an overall safety
-                      verdict. Review detected controls, unresolved checks,
-                      and the evidence before relying on this result.
-                    </p>
-                    <Link
-                      href="/resources#risk-model"
-                      className="mt-3 inline-block text-xs font-medium text-sky-300 underline-offset-4 hover:text-sky-200 hover:underline"
-                    >
-                      How to interpret the assessment →
-                    </Link>
-                  </div>
-
-                  <div className="mt-7 grid grid-cols-1 gap-6 sm:grid-cols-3">
-                    <div>
-                      <MetricLabel
-                        label="Resolved evidence confidence"
-                        tooltipTitle="Resolved evidence confidence"
-                      >
-                        Confidence reflects only findings that Cerynq
-                        successfully classified. Unknown checks are excluded
-                        from this metric, so read it together with Model
-                        coverage. It does not measure contract safety.
-                      </MetricLabel>
-                      <p className="mt-2 text-lg font-medium text-zinc-100">
-                        {formatConfidence(result.risk.confidence)}
-                      </p>
-                    </div>
-
-                    <div>
-                      <MetricLabel
-                        label="Model coverage"
-                        tooltipTitle="Model coverage"
-                      >
-                        Shows how many checks in the current Cerynq model
-                        returned a known result. 100% means all current checks
-                        were resolved, not that the entire contract was
-                        analyzed.
-                      </MetricLabel>
-                      <p className="mt-2 text-lg font-medium text-zinc-100">
-                        {result.risk.coverage.percentage}%
-                      </p>
-                      <p className="mt-1 text-xs text-zinc-500">
-                        {result.risk.coverage.knownFindings} of{" "}
-                        {result.risk.coverage.totalFindings} checks resolved
-                      </p>
-                    </div>
-
-                    <div>
-                      <MetricLabel
-                        label="Signals identified"
-                        tooltipTitle="Signals identified"
-                      >
-                        The number of current model checks that identified a
-                        supported risk signal. It is not a count of all
-                        possible contract risks.
-                      </MetricLabel>
-                      <p className="mt-2 text-lg font-medium text-zinc-100">
-                        {result.risk.detectedFindings.length} /{" "}
-                        {result.risk.coverage.totalFindings}
-                      </p>
-                    </div>
-                  </div>
-
-                  {result.risk.assessmentStatus === "partial" && (
-                    <div className="mt-7 rounded-lg border border-amber-900/50 bg-amber-950/20 p-4 text-sm leading-6 text-amber-200/80">
-                      <p>
-                        One or more current model checks remain Unknown. The
-                        displayed score reflects only resolved checks and
-                        should not be interpreted as a complete risk
-                        classification.
-                      </p>
-                      {result.intelligence.abiEvidenceQuality === "limited" && (
-                        <p className="mt-2">
-                          The analyzed ABI has limited verification
-                          provenance, so missing methods are not treated as
-                          evidence that a capability is absent.
-                        </p>
-                      )}
-                    </div>
-                  )}
-
-                  {result.risk.assessmentStatus === "insufficient" && (
-                    <div className="mt-7 rounded-lg border border-sky-900/50 bg-sky-950/20 p-4 text-sm leading-6 text-sky-200/80">
-                      The available evidence was insufficient to resolve the
-                      current model checks. No risk level is assigned.
-                    </div>
-                  )}
-
-                  <div className="mt-7 rounded-lg border border-zinc-800 bg-black/30 p-4">
-                    <p className="text-xs font-medium uppercase tracking-[0.14em] text-zinc-400">
-                      Beta scope
-                    </p>
-                    <p className="mt-2 text-xs leading-5 text-zinc-500">
-                      Cerynq Beta currently evaluates a defined set of
-                      privileged-control signals using Arc Mainnet data,
-                      analyzed ABI information and resolved implementation
-                      evidence when available. It does not replace a full
-                      smart-contract security audit.
-                    </p>
-                  </div>
-                </section>
-              )}
-
-              <section className="rounded-2xl border border-zinc-800 bg-zinc-950 p-6 text-left sm:p-7">
-                <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-                  <div>
-                    <p className="text-xs uppercase tracking-[0.2em] text-zinc-500">
-                      Contract Intelligence
-                    </p>
-                    <h2 className="mt-2 text-xl font-medium">
-                      {result.intelligence.contractName ??
-                        (result.isContract
-                          ? "Smart Contract"
-                          : "Externally Owned Account")}
-                    </h2>
-                  </div>
-
-                  <span className="w-fit rounded-full border border-zinc-700 px-3 py-1 text-xs text-zinc-300">
-                    {result.network}
-                  </span>
-                </div>
-
-                <dl className="space-y-5 text-sm">
-                  <div>
-                    <dt className="text-zinc-500">Address</dt>
-                    <dd className="mt-1 break-all font-mono text-zinc-200">
-                      {result.address}
-                    </dd>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-5 sm:grid-cols-4">
-                    <div>
-                      <dt className="text-zinc-500">Chain ID</dt>
-                      <dd className="mt-1 text-zinc-200">{result.chainId}</dd>
-                    </div>
-                    <div>
-                      <dt className="text-zinc-500">Type</dt>
-                      <dd className="mt-1 capitalize text-zinc-200">
-                        {result.contractType}
-                      </dd>
-                    </div>
-                    <div>
-                      <dt className="text-zinc-500">Bytecode</dt>
-                      <dd className="mt-1 text-zinc-200">
-                        {result.bytecodeDetected
-                          ? "Detected"
-                          : "Not detected"}
-                      </dd>
-                    </div>
-                    <div>
-                      <dt className="text-zinc-500">Bytecode size</dt>
-                      <dd className="mt-1 text-zinc-200">
-                        {result.bytecodeSize} bytes
-                      </dd>
-                    </div>
-                  </div>
-                </dl>
-
-                <div className="mt-7 border-t border-zinc-800 pt-7">
-                  <div className="flex items-center gap-2">
-                    <p className="text-xs uppercase tracking-[0.2em] text-zinc-500">
-                      Evidence Intelligence
-                    </p>
-                    <ResourceHelpLink
-                      topic="provenance"
-                      label="evidence provenance"
+                <div id="scan" className="scroll-mt-6 pt-5">
+                  <form
+                    onSubmit={handleSubmit}
+                    className="flex flex-col gap-2 rounded-xl border border-cyan-500/50 bg-[#0a2026]/90 p-2 shadow-[0_0_30px_#00bfd015] sm:flex-row"
+                  >
+                    <label htmlFor="contract-address" className="sr-only">
+                      Arc contract address
+                    </label>
+                    <input
+                      id="contract-address"
+                      value={address}
+                      disabled={loading}
+                      onChange={(e) => {
+                        setAddress(e.target.value);
+                        setError("");
+                      }}
+                      placeholder="Paste an Arc smart-contract address (0x...)"
+                      className="h-12 min-w-0 flex-1 rounded-lg bg-transparent px-3 font-mono text-sm text-white outline-none placeholder:font-sans placeholder:text-slate-400 focus-visible:ring-2 focus-visible:ring-cyan-400 disabled:opacity-50"
                     />
-                  </div>
+                    <button
+                      type="submit"
+                      disabled={loading}
+                      className="inline-flex h-12 items-center justify-center gap-2 rounded-lg bg-gradient-to-r from-cyan-600 to-cyan-500 px-6 text-sm font-semibold text-white transition hover:from-cyan-500 hover:to-teal-500 disabled:cursor-wait disabled:opacity-60"
+                    >
+                      {loading ? "Analyzing..." : "Analyze contract"}
+                      <Glyph name="arrow" size={16} />
+                    </button>
+                  </form>
 
-                  <div className="mt-5 grid grid-cols-1 gap-5 text-sm sm:grid-cols-2 lg:grid-cols-3">
-                    <div>
-                      <p className="text-zinc-500">Operational status</p>
-                      <p className="mt-1 text-zinc-200">
-                        {formatOperationalStatus(result.operationalStatus)}
-                      </p>
-                    </div>
-
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <p className="text-zinc-500">
-                          Contract verification
-                        </p>
-                        <ResourceHelpLink
-                          topic="verified-contract"
-                          label="contract verification"
-                        />
-                      </div>
-                      <p className="mt-1 text-zinc-200">
-                        {formatVerificationStatus(
-                          result.intelligence.contractVerificationStatus
-                        )}
-                      </p>
-                    </div>
-
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <p className="text-zinc-500">Proxy</p>
-                        <ResourceHelpLink
-                          topic="proxy"
-                          label="proxy detection"
-                        />
-                      </div>
-                      <p className="mt-1 text-zinc-200">
-                        {formatProxyType(result.intelligence.proxyType)}
-                      </p>
-                      {result.intelligence.proxyResolutionSource && (
-                        <p className="mt-1 text-xs text-zinc-600">
-                          {formatResolutionSource(
-                            result.intelligence.proxyResolutionSource
-                          )}
-                        </p>
-                      )}
-                    </div>
-
-                    <div>
-                      <p className="text-zinc-500">ABI provider</p>
-                      <p className="mt-1 text-zinc-200">
-                        {formatAbiProvider(result.intelligence.abiProvider)}
-                      </p>
-                    </div>
-
-                    <div>
-                      <p className="text-zinc-500">ABI source</p>
-                      <p className="mt-1 text-zinc-200">
-                        {result.intelligence.abiSource === "implementation"
-                          ? "Implementation"
-                          : result.intelligence.abiSource === "contract"
-                            ? "Contract"
-                            : "Unavailable"}
-                      </p>
-                    </div>
-
-                    <div>
-                      <p className="text-zinc-500">ABI evidence</p>
-                      <p className="mt-1 text-zinc-200">
-                        {formatAbiEvidenceQuality(
-                          result.intelligence.abiEvidenceQuality
-                        )}
-                      </p>
-                    </div>
-                  </div>
-
-                  {result.intelligence.hasMultipleImplementations && (
-                    <div className="mt-5 rounded-lg border border-sky-900/50 bg-sky-950/20 p-4">
-                      <p className="text-sm font-medium text-sky-200">
-                        Multiple implementations reported
-                      </p>
-                      <p className="mt-2 text-sm leading-6 text-sky-200/70">
-                        Available provider metadata reported{" "}
-                        {result.intelligence.implementationAddresses.length}{" "}
-                        implementations. Cerynq Beta does not reduce a
-                        multi-implementation proxy to a single ABI, so
-                        ABI-based checks remain unresolved.
-                      </p>
+                  {error && (
+                    <div
+                      role="alert"
+                      className="mt-3 rounded-xl border border-red-500/30 bg-red-950/30 p-4 text-sm text-red-200"
+                    >
+                      {errorOperationalStatus === "unavailable"
+                        ? "Arc Mainnet unavailable: "
+                        : ""}
+                      {error}
                     </div>
                   )}
 
-                  {result.intelligence.implementationAddress && (
-                    <div className="mt-5 rounded-lg border border-zinc-900 bg-black/30 p-4">
-                      <div className="flex items-center gap-2">
-                        <p className="text-zinc-500">
-                          Analyzed implementation
+                  <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-cyan-100/65">
+                    <span>Arc Mainnet</span>
+                    <span>Risk Model v0.1</span>
+                    <span>Explainable evidence</span>
+                    <span className="text-cyan-300">Public Beta</span>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <div className="mt-5 grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_270px]">
+              <div className="min-w-0">
+
+                {!result && (
+                  <Card className="p-5 sm:p-7">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div className="max-w-xl">
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-cyan-300">
+                          Welcome to Cerynq
                         </p>
-                        <ResourceHelpLink
+
+                        <h2 className="mt-2 text-xl font-semibold text-white">
+                          Understand risk before interacting.
+                        </h2>
+
+                        <p className="mt-2 text-sm leading-6 text-slate-300">
+                          Explore supported smart-contract controls,
+                          review evidence, and understand the limitations
+                          behind each result on Arc Mainnet.
+                        </p>
+                      </div>
+
+                      <Tag tone="blue">Public Beta</Tag>
+                    </div>
+
+                    <div className="mt-5 grid gap-3 sm:grid-cols-3">
+                      {[
+                        {
+                          title: "1. Analyze",
+                          body: "Enter an Arc smart-contract address.",
+                          icon: "scan"
+                        },
+                        {
+                          title: "2. Understand",
+                          body: "Review supported signals and model coverage.",
+                          icon: "shield"
+                        },
+                        {
+                          title: "3. Verify",
+                          body: "Explore the supporting evidence in Resources.",
+                          icon: "book"
+                        }
+                      ].map((item) => (
+                        <div
+                          key={item.title}
+                          className="rounded-xl border border-[#25525c] bg-[#102932]/70 p-4"
+                        >
+                          <span className="text-cyan-300">
+                            <Glyph name={item.icon} size={20} />
+                          </span>
+
+                          <h3 className="mt-3 text-sm font-semibold text-white">
+                            {item.title}
+                          </h3>
+
+                          <p className="mt-1 text-xs leading-5 text-slate-400">
+                            {item.body}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="mt-5 flex flex-wrap items-center justify-between gap-4 border-t border-[#204650] pt-5">
+                      <div className="max-w-lg">
+                        <p className="text-sm font-semibold text-white">
+                          Explore a real analysis: Argus
+                        </p>
+
+                        <p className="mt-1 text-xs leading-5 text-slate-400">
+                          Analyze a real contract using the same Cerynq
+                          scanner. Results are retrieved from the live API.
+                        </p>
+
+                        <Link
+                          href="/resources"
+                          className="mt-2 inline-block text-xs font-medium text-cyan-300 hover:text-cyan-100"
+                        >
+                          Learn how to interpret the results →
+                        </Link>
+                      </div>
+
+                      <button
+                        type="button"
+                        disabled={loading}
+                        onClick={() => {
+                          setAddress(ARGUS_ADDRESS);
+                          void performScan(ARGUS_ADDRESS);
+                        }}
+                        className="inline-flex items-center justify-center gap-2 rounded-lg border border-cyan-500/50 bg-cyan-500/15 px-4 py-3 text-sm font-semibold text-cyan-100 transition hover:bg-cyan-500/25 disabled:opacity-60"
+                      >
+                        {loading ? "Analyzing Argus..." : "Analyze example: Argus"}
+                        <Glyph name="arrow" size={16} />
+                      </button>
+                    </div>
+                  </Card>
+                )}
+                {result && (
+                  <div
+                    id="results"
+                    className="mt-0 scroll-mt-4 space-y-4"
+                  >
+                    <Card className="flex flex-wrap items-center justify-between gap-3 px-5 py-4">
+                      <div className="flex min-w-0 items-center gap-3">
+                        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-cyan-500/30 bg-cyan-600/10 text-cyan-300">
+                          <Glyph name="shield" size={23} />
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-base font-semibold text-white">
+                            {result.intelligence.contractName ??
+                              (result.isContract
+                                ? "Smart contract"
+                                : "Account address")}
+                          </p>
+                          <p className="break-all font-mono text-[11px] text-slate-400">
+                            {result.address}
+                          </p>
+                        </div>
+                      </div>
+                      <Tag tone="blue">
+                        Arc Mainnet · {result.chainId}
+                      </Tag>
+                    </Card>
+
+                    {result.operationalStatus !== "normal" && (
+                      <div className="rounded-xl border border-amber-500/30 bg-amber-400/10 p-4 text-sm text-amber-200">
+                        <strong className="capitalize">
+                          {result.operationalStatus} evidence mode.
+                        </strong>{" "}
+                        {result.operationalStatus === "degraded"
+                          ? "Fallback evidence from Sourcify was used because the primary metadata source was unavailable or incomplete."
+                          : "ABI evidence was insufficient; some checks may remain Unknown."}
+                        {" "}Blockscout:{" "}
+                        {titleCase(result.providers.blockscout.status)}
+                        {" · "}Sourcify:{" "}
+                        {titleCase(result.providers.sourcify.status)}.
+                      </div>
+                    )}
+
+                    {!result.isContract && (
+                      <Card className="p-6">
+                        <h2 className="font-semibold">
+                          No smart-contract bytecode detected
+                        </h2>
+                        <p className="mt-2 text-sm text-slate-400">
+                          This appears to be an externally owned account.
+                          The contract risk model was not applied.
+                        </p>
+                      </Card>
+                    )}
+
+                    {risk && (
+                      <Card className="overflow-hidden p-5 sm:p-7">
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div>
+                            <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-cyan-300">
+                              Risk Overview
+                            </p>
+                            <h2 className="mt-1.5 text-xl font-bold">
+                              What the evidence indicates
+                            </h2>
+                          </div>
+                          <Tag
+                            tone={
+                              risk.assessmentStatus === "complete"
+                                ? "amber"
+                                : "blue"
+                            }
+                          >
+                            {risk.assessmentStatus === "complete"
+                              ? `${titleCase(risk.riskLevel)} signal risk`
+                              : risk.assessmentStatus === "partial"
+                                ? "Partial assessment"
+                                : "Insufficient evidence"}
+                          </Tag>
+                        </div>
+
+                        <div className="mt-6 grid gap-4 lg:grid-cols-2">
+                          <div className="flex flex-col gap-5 rounded-xl border border-[#2d5660] bg-[#0e272f] p-5 sm:flex-row sm:items-center">
+                            <div
+                              className="relative mx-auto h-32 w-32 shrink-0 rounded-full p-[9px] sm:mx-0"
+                              style={{
+                                background: `conic-gradient(${scoreAccent} ${
+                                  risk.assessmentStatus === "insufficient"
+                                    ? 0
+                                    : score
+                                }%, #334463 0)`,
+                              }}
+                            >
+                              <div className="flex h-full w-full flex-col items-center justify-center rounded-full bg-[#0e272f]">
+                                <strong className="text-3xl font-bold">
+                                  {risk.assessmentStatus === "insufficient"
+                                    ? "N/A"
+                                    : score}
+                                </strong>
+                                <span className="text-xs text-slate-400">
+                                  {risk.assessmentStatus === "insufficient"
+                                    ? "No score"
+                                    : "/ 100"}
+                                </span>
+                              </div>
+                            </div>
+                            <div className="min-w-0">
+                              <p className="text-base font-semibold leading-snug">
+                                {riskHeadline}
+                              </p>
+                              <p className="mt-2 text-sm leading-6 text-slate-400">
+                                {riskExplanation}
+                              </p>
+                              <p className="mt-3 text-xs text-cyan-300">
+                                {risk.assessmentStatus === "complete"
+                                  ? "Privileged-control signal score"
+                                  : "Observed signal score — incomplete coverage"}
+                              </p>
+                            </div>
+                          </div>
+
+                          <div className="rounded-xl border border-[#2d5660] bg-[#0e272f] p-5">
+                            <div className="flex items-center gap-2">
+                              <Glyph name="info" size={18} />
+                              <h3 className="font-semibold">
+                                What to verify next
+                              </h3>
+                            </div>
+                            <ul className="mt-4 space-y-3 text-sm leading-6 text-slate-300">
+                              <li>
+                                • Identify who controls administrative permissions.
+                              </li>
+                              <li>
+                                • Review the resolved implementation and its
+                                verification status.
+                              </li>
+                              <li>
+                                • Investigate unknown checks before assuming
+                                a capability is absent.
+                              </li>
+                            </ul>
+                            <Link
+                              href={infoUrl("risk-model")}
+                              className="mt-4 inline-block text-sm font-medium text-cyan-300 hover:text-cyan-200"
+                            >
+                              Understand the risk model →
+                            </Link>
+                          </div>
+                        </div>
+
+                        <div className="mt-5 grid grid-cols-2 gap-3 border-t border-[#204650] pt-5 sm:grid-cols-4">
+                          <Datum
+                            label="Model coverage"
+                            value={`${risk.coverage.percentage}% (${risk.coverage.knownFindings}/${risk.coverage.totalFindings})`}
+                          />
+                          <Datum
+                            label="Resolved confidence"
+                            value={titleCase(risk.confidence)}
+                          />
+                          <Datum
+                            label="Signals identified"
+                            value={`${risk.detectedFindings.length}/${risk.coverage.totalFindings}`}
+                          />
+                          <Datum
+                            label="Unknown checks"
+                            value={risk.coverage.unknownFindings}
+                          />
+                        </div>
+
+                        {risk.assessmentStatus !== "complete" && (
+                          <p className="mt-5 rounded-xl border border-amber-500/25 bg-amber-500/[0.07] p-3 text-xs leading-6 text-amber-200/90">
+                            This is not a complete risk classification.
+                            ABI verification is{" "}
+                            {result.intelligence.abiEvidenceQuality};
+                            unavailable or limited evidence must not be
+                            interpreted as proof of safety.
+                          </p>
+                        )}
+                      </Card>
+                    )}
+
+                    {result.isContract && (
+                      <Card className="p-5 sm:p-7">
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div>
+                            <p className="text-[11px] uppercase tracking-[0.2em] text-cyan-300">
+                              Evidence intelligence
+                            </p>
+                            <h2 className="mt-2 text-xl font-bold">
+                              What Cerynq observed
+                            </h2>
+                            <p className="mt-1.5 text-sm text-slate-400">
+                              Evidence from Arc Mainnet and supported
+                              metadata sources — not an audit.
+                            </p>
+                          </div>
+                          <Tag>Arc Mainnet</Tag>
+                        </div>
+
+                        <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                          <EvidenceTile
+                            title="Contract Verification"
+                            topic="verified-contract"
+                            result={verified(
+                              result.intelligence.contractVerificationStatus
+                            )}
+                            detail="Source-code verification reported by supported providers."
+                            tone={
+                              [
+                                "fully_verified",
+                                "partially_verified",
+                                "verified",
+                              ].includes(
+                                result.intelligence.contractVerificationStatus
+                              )
+                                ? "observed"
+                                : "unknown"
+                            }
+                          />
+                          <EvidenceTile
+                            title="Proxy Structure"
+                            topic="proxy"
+                            result={proxyText(result.intelligence.proxyType)}
+                            detail={
+                              result.intelligence.proxyResolutionSource
+                                ? `Source: ${sourceText(
+                                    result.intelligence.proxyResolutionSource
+                                  )}`
+                                : "No supported proxy type identified."
+                            }
+                            tone={
+                              result.intelligence.proxyType
+                                ? "observed"
+                                : "neutral"
+                            }
+                          />
+                          <EvidenceTile
+                            title="Implementation"
+                            topic="implementation"
+                            result={
+                              result.intelligence.implementationAddress
+                                ? "Resolved"
+                                : "Not resolved"
+                            }
+                            detail={
+                              result.intelligence.implementationAddress
+                                ? `${result.intelligence.implementationAddress.slice(
+                                    0,
+                                    10
+                                  )}…`
+                                : "No implementation address resolved."
+                            }
+                            tone={
+                              result.intelligence.implementationAddress
+                                ? "observed"
+                                : "unknown"
+                            }
+                          />
+                          <EvidenceTile
+                            title="Ownership Control"
+                            topic="ownership"
+                            result={
+                              result.ownership
+                                ? statusText(result.ownership.status)
+                                : "Unavailable"
+                            }
+                            detail="Recognized owner mechanisms and direct RPC evidence."
+                            tone={
+                              result.ownership?.status === "detected"
+                                ? "observed"
+                                : "unknown"
+                            }
+                          />
+                          <EvidenceTile
+                            title="Pause Capability"
+                            topic="pause"
+                            result={
+                              result.pause
+                                ? statusText(result.pause.status)
+                                : "Unavailable"
+                            }
+                            detail="Supported pause-related ABI signals."
+                            tone={
+                              result.pause?.status === "detected"
+                                ? "observed"
+                                : "unknown"
+                            }
+                          />
+                          <EvidenceTile
+                            title="Evidence Provenance"
+                            topic="provenance"
+                            result={
+                              sourcePresent
+                                ? `Source: ${sourceText(
+                                    result.intelligence.abiProvider
+                                  )}`
+                                : "Source unavailable"
+                            }
+                            detail={`ABI evidence: ${titleCase(
+                              result.intelligence.abiEvidenceQuality
+                            )}.`}
+                            tone={sourcePresent ? "observed" : "unknown"}
+                          />
+                        </div>
+                      </Card>
+                    )}
+
+                    {result.isContract && (
+                      <Card className="p-5 sm:p-7">
+                        <div className="flex flex-wrap items-end justify-between gap-3">
+                          <div>
+                            <p className="text-[11px] uppercase tracking-[0.2em] text-cyan-300">
+                              Risk Findings
+                            </p>
+                            <h2 className="mt-2 text-xl font-bold">
+                              Explainable controls
+                            </h2>
+                            <p className="mt-2 text-sm text-slate-400">
+                              Each finding retains its original evidence,
+                              classification and limitations.
+                            </p>
+                          </div>
+                          <Link
+                            href="/resources"
+                            className="text-sm text-cyan-300 hover:text-cyan-200"
+                          >
+                            Explore Resources →
+                          </Link>
+                        </div>
+
+                        <div className="mt-5 space-y-3">
+                          {findings.map((f) => (
+                            <article
+                              key={f.id}
+                              className="rounded-xl border border-[#25525c] bg-[#10262e] p-4 sm:p-5"
+                            >
+                              <div className="flex flex-wrap items-start justify-between gap-3">
+                                <div className="flex min-w-0 items-center gap-1">
+                                  <h3 className="text-sm font-semibold text-white sm:text-base">
+                                    {f.name}
+                                  </h3>
+                                  {controlTopics[f.id] && (
+                                    <Help
+                                      topic={controlTopics[f.id]}
+                                      label={f.name}
+                                    />
+                                  )}
+                                </div>
+                                <span
+                                  className={`rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide ${statusStyle(
+                                    f.status
+                                  )}`}
+                                >
+                                  {statusText(f.status)}
+                                </span>
+                              </div>
+
+                              <p className="mt-3 text-sm leading-6 text-slate-400">
+                                {f.explanation}
+                              </p>
+
+                              <details className="group mt-4 border-t border-[#20515c] pt-3">
+                                <summary className="cursor-pointer text-xs font-semibold text-cyan-300 hover:text-cyan-200">
+                                  View supporting evidence
+                                  <span
+                                    aria-hidden="true"
+                                    className="ml-1 group-open:hidden"
+                                  >
+                                    +
+                                  </span>
+                                  <span
+                                    aria-hidden="true"
+                                    className="ml-1 hidden group-open:inline"
+                                  >
+                                    −
+                                  </span>
+                                </summary>
+
+                                <dl className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                                  <Datum
+                                    label="Evidence confidence"
+                                    value={titleCase(f.confidence)}
+                                  />
+                                  <Datum
+                                    label="Score contribution"
+                                    value={
+                                      f.scoreImpact > 0
+                                        ? `+${f.scoreImpact}`
+                                        : "0"
+                                    }
+                                  />
+                                  <Datum
+                                    label="Methods observed"
+                                    value={
+                                      <span className="font-mono text-xs">
+                                        {methodText(f)}
+                                      </span>
+                                    }
+                                  />
+                                  <Datum
+                                    label="Evidence source"
+                                    value={
+                                      <>
+                                        <span>{f.evidence.source}</span>
+                                        <span className="block text-xs font-normal text-slate-400">
+                                          {titleCase(f.evidence.type)}
+                                        </span>
+                                      </>
+                                    }
+                                  />
+
+                                  {f.id === "A1" && (
+                                    <>
+                                      <Datum
+                                        label="Owner address"
+                                        value={
+                                          <span className="break-all font-mono text-xs">
+                                            {f.ownerAddress ?? "Unknown"}
+                                          </span>
+                                        }
+                                      />
+                                      <Datum
+                                        label="Interface source"
+                                        value={
+                                          f.evidence.interfaceSource ??
+                                          "Unavailable"
+                                        }
+                                      />
+                                      <Datum
+                                        label="Ownership renounced"
+                                        value={
+                                          f.renounced === null ||
+                                          f.renounced === undefined
+                                            ? "Unknown"
+                                            : f.renounced
+                                              ? "Yes"
+                                              : "No"
+                                        }
+                                      />
+                                    </>
+                                  )}
+                                </dl>
+                              </details>
+                            </article>
+                          ))}
+                        </div>
+                      </Card>
+                    )}
+
+                    <Card className="p-5 sm:p-7">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div>
+                          <p className="text-[11px] uppercase tracking-[0.2em] text-cyan-300">
+                            Technical details
+                          </p>
+                          <h2 className="mt-2 text-lg font-semibold">
+                            Traceable contract data
+                          </h2>
+                        </div>
+                        <Help
                           topic="implementation"
-                          label="implementation resolution"
+                          label="technical implementation details"
                         />
                       </div>
 
-                      <p className="mt-2 break-all font-mono text-sm text-zinc-200">
-                        {result.intelligence.implementationAddress}
-                      </p>
-
-                      {result.intelligence.implementationResolutionSource && (
-                        <p className="mt-1 text-xs text-zinc-600">
-                          Source:{" "}
-                          {formatResolutionSource(
-                            result.intelligence.implementationResolutionSource
-                          )}
-                        </p>
-                      )}
-
-                      {result.intelligence.implementationContractName && (
-                        <p className="mt-2 text-sm text-zinc-500">
-                          {result.intelligence.implementationContractName}
-                        </p>
-                      )}
-
-                      <div className="mt-4 grid gap-4 border-t border-zinc-900 pt-4 text-xs sm:grid-cols-2">
-                        <div>
-                          <p className="text-zinc-600">Verification</p>
-                          <p className="mt-1 text-zinc-400">
-                            {formatVerificationStatus(
+                      <details className="group mt-4 rounded-xl border border-[#20515c] bg-[#10262e] p-4">
+                        <summary className="cursor-pointer text-sm font-medium text-cyan-300">
+                          View advanced evidence and contract metadata
+                        </summary>
+                        <dl className="mt-5 grid gap-5 border-t border-[#20515c] pt-5 sm:grid-cols-2 lg:grid-cols-3">
+                          <Datum
+                            label="Contract name"
+                            value={result.intelligence.contractName ?? "Unknown"}
+                          />
+                          <Datum
+                            label="Address"
+                            value={
+                              <span className="break-all font-mono text-xs">
+                                {result.address}
+                              </span>
+                            }
+                          />
+                          <Datum label="Chain ID" value={result.chainId} />
+                          <Datum
+                            label="Address type"
+                            value={result.contractType}
+                          />
+                          <Datum
+                            label="Bytecode"
+                            value={
+                              result.bytecodeDetected
+                                ? `${result.bytecodeSize} bytes`
+                                : "Not detected"
+                            }
+                          />
+                          <Datum
+                            label="Operational status"
+                            value={titleCase(result.operationalStatus)}
+                          />
+                          <Datum
+                            label="ABI provider"
+                            value={sourceText(
+                              result.intelligence.abiProvider
+                            )}
+                          />
+                          <Datum
+                            label="ABI source"
+                            value={
+                              result.intelligence.abiSource ?? "Unavailable"
+                            }
+                          />
+                          <Datum
+                            label="ABI quality"
+                            value={titleCase(
+                              result.intelligence.abiEvidenceQuality
+                            )}
+                          />
+                          <Datum
+                            label="ABI verification"
+                            value={verified(
+                              result.intelligence.abiVerificationStatus
+                            )}
+                          />
+                          <Datum
+                            label="Implementation verification"
+                            value={verified(
                               result.intelligence
                                 .implementationVerificationStatus
                             )}
-                          </p>
-                        </div>
-
-                        <div>
-                          <p className="text-zinc-600">ABI evidence</p>
-                          <p className="mt-1 text-zinc-400">
-                            {formatAbiEvidenceQuality(
-                              result.intelligence.abiEvidenceQuality
+                          />
+                          <Datum
+                            label="Implementation name"
+                            value={
+                              result.intelligence
+                                .implementationContractName ?? "Unknown"
+                            }
+                          />
+                          <Datum
+                            label="Implementation address"
+                            value={
+                              <span className="break-all font-mono text-xs">
+                                {result.intelligence.implementationAddress ??
+                                  "Unresolved"}
+                              </span>
+                            }
+                          />
+                          <Datum
+                            label="Implementation source"
+                            value={sourceText(
+                              result.intelligence
+                                .implementationResolutionSource
                             )}
+                          />
+                          <Datum
+                            label="Multiple implementations"
+                            value={
+                              result.intelligence.hasMultipleImplementations
+                                ? `Yes (${result.intelligence.implementationAddresses.length} reported)`
+                                : "Not reported"
+                            }
+                          />
+                          <Datum
+                            label="Owner ABI function"
+                            value={
+                              result.intelligence.hasOwnerFunction === null
+                                ? "Unknown"
+                                : result.intelligence.hasOwnerFunction
+                                  ? "Present"
+                                  : "Not identified"
+                            }
+                          />
+                          <Datum
+                            label="Blockscout status"
+                            value={titleCase(
+                              result.providers.blockscout.status
+                            )}
+                          />
+                          <Datum
+                            label="Sourcify status"
+                            value={titleCase(
+                              result.providers.sourcify.status
+                            )}
+                          />
+                        </dl>
+
+                        {result.intelligence.hasMultipleImplementations && (
+                          <p className="mt-5 rounded-lg border border-cyan-500/30 bg-cyan-500/10 p-3 text-xs leading-6 text-cyan-200">
+                            Multiple implementations were reported. The beta
+                            does not reduce this structure to a single ABI;
+                            related checks may remain unresolved.
                           </p>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </section>
+                        )}
+                      </details>
+                    </Card>
 
-              {findings.length > 0 && (
-                <section className="space-y-4">
-                  <div className="px-1 text-left">
-                    <p className="text-xs uppercase tracking-[0.2em] text-zinc-500">
-                      Risk Findings
-                    </p>
-
-                    <h2 className="mt-2 text-2xl font-medium">
-                      Explainable controls
-                    </h2>
-
-                    <p className="mt-2 max-w-2xl text-sm leading-6 text-zinc-500">
-                      Explore what was detected, what remains unknown, and
-                      which checks may need closer review. Select the
-                      information icon next to a control to read its
-                      explanation in Resources.
+                    <p className="px-2 text-xs leading-6 text-slate-500">
+                      Cerynq provides informational evidence about supported
+                      control patterns. Results are not a security audit, a
+                      fraud determination or financial, legal or investment advice.
                     </p>
                   </div>
+                )}
+              </div>
 
-                  {findings.map((finding) => (
-                    <article
-                      key={finding.id}
-                      className="rounded-2xl border border-zinc-800 bg-zinc-950 p-6 text-left"
+              <section
+                id="roadmap"
+                className="scroll-mt-6 rounded-2xl border border-[#1e454e] bg-gradient-to-br from-[#0b2026] to-[#061317] p-5 xl:sticky xl:top-5"
+              >
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <p className="text-[11px] uppercase tracking-[0.2em] text-cyan-300">
+                      Beyond a single scan
+                    </p>
+                    <h2 className="mt-2 text-xl font-bold">
+                      A foundation for broader risk intelligence
+                    </h2>
+                    <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-400">
+                      The public beta focuses on explainable contract
+                      analysis. The capabilities below are part of the
+                      product vision, not active features.
+                    </p>
+                  </div>
+                  <Tag tone="blue">Roadmap</Tag>
+                </div>
+
+                <div className="mt-5 grid gap-3 sm:grid-cols-3 xl:grid-cols-1">
+                  {[
+                    {
+                      name: "Continuous monitoring",
+                      desc: "Track changes to supported contracts and risk signals over time.",
+                      icon: "pulse",
+                    },
+                    {
+                      name: "Wallet investigations",
+                      desc: "Investigate flagged wallets, counterparties and exposure patterns.",
+                      icon: "nodes",
+                    },
+                    {
+                      name: "Institutional intelligence",
+                      desc: "Explore risk workflows, investigations and future integration APIs.",
+                      icon: "building",
+                    },
+                  ].map((item) => (
+                    <div
+                      key={item.name}
+                      className="rounded-xl border border-[#25525c] bg-[#102932]/70 p-4"
                     >
-                      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <h3 className="text-lg font-medium">
-                              {finding.name}
-                            </h3>
-
-                            {RESOURCE_ANCHORS[finding.id] && (
-                              <ResourceHelpLink
-                                topic={RESOURCE_ANCHORS[finding.id]}
-                                label={finding.name}
-                              />
-                            )}
-                          </div>
-
-                          <p className="mt-3 max-w-2xl text-sm leading-6 text-zinc-400">
-                            {finding.explanation}
-                          </p>
-                        </div>
-
-                        <span
-                          className={`w-fit rounded-full border px-3 py-1 text-[11px] font-medium uppercase tracking-wide ${getStatusClasses(
-                            finding.status
-                          )}`}
-                        >
-                          {formatStatus(finding.status)}
+                      <div className="flex items-center justify-between text-cyan-300">
+                        <Glyph name={item.icon} size={22} />
+                        <span className="text-[10px] text-slate-400">
+                          Planned
                         </span>
                       </div>
-
-                      <div className="mt-6 grid grid-cols-1 gap-5 border-t border-zinc-800 pt-6 text-sm sm:grid-cols-2 lg:grid-cols-4">
-                        <div>
-                          <MetricLabel
-                            label="Evidence confidence"
-                            tooltipTitle="Finding evidence confidence"
-                          >
-                            Indicates how strongly the available evidence
-                            supports this specific classification. It does
-                            not prove the absence of other mechanisms or
-                            behaviors.
-                          </MetricLabel>
-
-                          <p className="mt-2 text-zinc-200">
-                            {formatConfidence(finding.confidence)}
-                          </p>
-                        </div>
-
-                        <div>
-                          <MetricLabel
-                            label="Score contribution"
-                            tooltipTitle="Score contribution"
-                          >
-                            Raw contribution from this signal to Risk Model
-                            v0.1. The combined raw score is normalized to a
-                            0-100 scale.
-                          </MetricLabel>
-
-                          <p className="mt-2 text-zinc-200">
-                            {finding.scoreImpact > 0
-                              ? `+${finding.scoreImpact}`
-                              : "0"}
-                          </p>
-                        </div>
-
-                        <div>
-                          <MetricLabel
-                            label="Evidence"
-                            tooltipTitle="Evidence"
-                          >
-                            The observable function or ABI signal used by
-                            this detector. Interface-level evidence does
-                            not describe every possible runtime behavior.
-                          </MetricLabel>
-
-                          <p className="mt-2 break-words font-mono text-zinc-200">
-                            {getEvidenceMethods(finding)}
-                          </p>
-                        </div>
-
-                        <div>
-                          <MetricLabel
-                            label="Evidence source"
-                            tooltipTitle="Evidence source"
-                          >
-                            Where Cerynq obtained the evidence, such as a
-                            resolved implementation ABI or Arc Mainnet RPC.
-                          </MetricLabel>
-
-                          <p className="mt-2 text-zinc-200">
-                            {finding.evidence.source}
-                          </p>
-                          <p className="mt-1 text-xs text-zinc-500">
-                            {formatEvidenceType(finding.evidence.type)}
-                          </p>
-                        </div>
-                      </div>
-
-                      {finding.id === "A1" && (
-                        <div className="mt-6 grid gap-5 border-t border-zinc-800 pt-6 text-sm sm:grid-cols-2">
-                          <div>
-                            <p className="text-zinc-500">Owner address</p>
-                            <p className="mt-2 break-all font-mono text-zinc-200">
-                              {(finding as OwnershipFinding).ownerAddress ??
-                                "Unknown"}
-                            </p>
-                          </div>
-
-                          {finding.evidence.interfaceSource && (
-                            <div>
-                              <p className="text-zinc-500">
-                                Interface source
-                              </p>
-                              <p className="mt-2 text-zinc-200">
-                                {finding.evidence.interfaceSource}
-                              </p>
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </article>
+                      <h3 className="mt-3 text-sm font-semibold">
+                        {item.name}
+                      </h3>
+                      <p className="mt-2 text-xs leading-5 text-slate-400">
+                        {item.desc}
+                      </p>
+                    </div>
                   ))}
-                </section>
-              )}
-
-              <section className="rounded-xl border border-zinc-900 bg-zinc-950/50 p-5 text-left">
-                <p className="text-xs leading-5 text-zinc-500">
-                  Cerynq analyzes available Arc Mainnet and external
-                  verification evidence to surface supported risk signals.
-                  Results are informational and do not constitute a complete
-                  security audit or financial, legal or investment advice.
-                </p>
+                </div>
               </section>
             </div>
-          )}
 
-          <footer className="mt-10 flex flex-col gap-2 border-t border-zinc-900 pt-6 text-xs text-zinc-600 sm:flex-row sm:items-center sm:justify-between">
-            <span>Cerynq - Explainable onchain risk intelligence</span>
-            <span>Arc Mainnet - Risk Model v0.1</span>
-          </footer>
+            <footer
+              id="arc"
+              className="mt-8 flex flex-wrap items-center justify-between gap-2 border-t border-[#204650] pt-5 text-xs text-slate-500"
+            >
+              <span>
+                Cerynq Public Beta · Arc Mainnet · Risk Model v0.1
+              </span>
+              <div className="flex items-center gap-4">
+                <a
+                  href="https://x.com/Cerynq"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 text-slate-300 hover:text-white"
+                  aria-label="Cerynq on X"
+                >
+                  <Glyph name="x" size={14} /> X
+                </a>
+                <Link
+                  href="/resources"
+                  className="text-cyan-300 hover:text-cyan-200"
+                >
+                  Methodology & Resources →
+                </Link>
+              </div>
+            </footer>
+          </div>
         </div>
       </div>
     </main>
